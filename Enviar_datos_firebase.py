@@ -2,6 +2,7 @@ import firbase_funciones as firebase
 import os
 import paho.mqtt.client as mqtt
 import time
+from topicos import mqtt_topics, firebase_topics
 
 
 
@@ -21,50 +22,19 @@ def recibido_a_int(objeto_firebase):
     else:
         print("error_de_lectura")
         return 0
+    
+def recibido_a_bool(objeto_firebase):
+    if objeto_firebase is not None:
+        return bool(objeto_firebase)
+    else:
+        print("error_de_lectura")
+        return 0
 
 
 
 
 ######### -----------------TOPICOS MQTT --------------#################
 
-
-telemetria = {
-    "v_der": "robot/telemetria/v_der",
-    "v_izq": "robot/telemetria/v_izq",
-    "v_total": "robot/telemetria/v_total",
-    "teta": "robot/telemetria/teta",
-    "omega": "robot/telemetria/omega",
-    "x": "robot/telemetria/x",
-    "y": "robot/telemetria/y",
-    "d_pared_der": "robot/telemetria/d_pared_der",
-    "d_pared_izq": "robot/telemetria/d_pared_izq",
-    "d_pared_trasera": "robot/telemetria/d_pared_trasera",
-    "distancia_recorrida": "robot/telemetria/distancia_recorrida",
-    "pilas": "robot/telemetria/pilas",
-}
-
-estados = {
-    "conexion_esp": "robot/estados/conectado_esp",
-    "conexion_firebase": "robot/estados/conectado_firebase",
-    "modo_control": "robot/estados/modo_control",
-    "flag_pos": "robot/estados/flag_pos",
-    "flag_obstaculo": "robot/estados/flag_pos",
-    "ejecutando": "robot/estados/ejecutando",
-    "grabar": "robot/estados/grabar",
-    "reinicio": "robot/estados/reinicio",
-}
-
-comandos = {
-    "duty_der": "robot/comandos/duty_der",
-    "duty_izq": "robot/comandos/duty_izq",
-    "teta_ref": "robot/comandos/teta_ref",
-    "v_der_ref": "robot/comandos/v_der_ref",
-    "v_izq_ref": "robot/comandos/v_izq_ref",
-    "v_total_ref": "robot/comandos/v_total_ref",
-    "x_ref": "robot/comandos/x_ref",
-    "y_ref": "robot/comandos/y_ref",
-}
-# se usa: telemetria["v_der"], estados["conexion_esp"], comandos["duty_der"]
 
 ############ -------- ACCIONES A REALIZAR CUANDO RECIBE DATOS -----------------############
 
@@ -76,6 +46,12 @@ def on_message(client, userdata, msg):
      #   firebase.actualizar_estado("/Escritura/Potencia_derecha", int(round(float(msg.payload.decode()))))
     #elif msg.topic == "robot/v_izquierda":
     #    firebase.actualizar_estado("/Escritura/Potencia_izquierda", int(round(float(msg.payload.decode()))))
+    if msg.topic == mqtt_topics["estados"]["estado_esp"]:
+        texto = msg.payload.decode().strip().lower()
+        valor = texto in ("true", "1", "yes", "on")
+        estado_esp = valor
+        firebase.actualizar_estado(firebase_topics["estados"]["estado_esp"], estado_esp)
+
     pass
 
 
@@ -98,41 +74,67 @@ client.connect("localhost", 1883)
 
 ####------------ suscripciones -----------###
 
-
+client.subscribe(mqtt_topics["estados"]["conexion_esp"])
 
 
 # inicio el firebase
 firebase.iniciar_firebase()
+firebase.actualizar_estado(firebase_topics["estados"]["conexion_firebase"], True)
 
 
 
-client.loop_start() #parto el mqtt
-
-ruta1 =comandos["duty_der"]
-ruta2 =comandos["duty_izq"]
-
-ruta1_firebase =ruta1.strip("/robot")
-
-ruta2_firebase = ruta2.strip("/robot")
-print(ruta1_firebase)
-print(ruta2_firebase)
 
 time.sleep(1)
 
+
+######---------------- VARIABLES ----------------
+estado_esp = False
+
 #### --------------- LECTURA DE DATOS FIREBASE ------------ ############
+i = 0 #usare pa ir viendo ejecuciones
+
 
 while True:
+    i+= 1 # variable pa ir contando ciclos
+    inicio = time.perf_counter()  #con esto cacho cuanto demora
 
-    # se leen los valores
-    obj_der = firebase.leer_estado("/Comandos/duty_der")
-    obj_izq = firebase.leer_estado("/Comandos/duty_izq")
 
-    duty_der = recibido_a_int(obj_der)
-    duty_izq = recibido_a_int(obj_izq)
+
+
+
+
+    # se leen y guardan los valores 
+    #----------FIREBASE---------------------------------------------------------------------------
+    duty_der = recibido_a_int(firebase.leer_estado(firebase_topics["comandos"]["duty_der"]))
+    duty_izq = recibido_a_int(firebase.leer_estado(firebase_topics["comandos"]["duty_izq"]))
+    
+
+
+    if i%10 == 0: # -------DATOS QUE NO QUIERO FULL LATENCIA 
+        firebase.actualizar_estado(firebase_topics["estados"]["conexion_firebase"], True) #estado de conexion del firebase
+        estado_esp = recibido_a_bool(firebase.leer_estado(firebase_topics["estados"]["conexion_esp"]))
+        print(estado_esp)
+        client.publish(mqtt_topics["estados"]["conexion_esp"], estado_esp)
+
+
+
+
+
+
+    # -------------MQTT----------------------------------------------------------------------------------
+    client.publish(mqtt_topics["comandos"]["duty_der"], duty_der)
+    client.publish(mqtt_topics["comandos"]["duty_izq"], duty_izq)
+
+
+
     
 
 
 
 
-    client.publish(ruta1, duty_der)
-    client.publish(ruta2, duty_izq)
+
+
+    #pa ver el tiempo
+    duracion = time.perf_counter() - inicio
+
+    time.sleep(0.01) #La esp supongamos que lee y manda a 10hz, por lo que la lectura deberia ir mas o menos al mismo rango

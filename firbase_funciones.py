@@ -21,6 +21,7 @@ def _asegurar_firebase_inicializado():
         iniciar_firebase()
 
 
+
 def actualizar_estado(ruta, valor):
     _asegurar_firebase_inicializado()
     ref = db.reference(ruta)
