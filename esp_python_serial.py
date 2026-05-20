@@ -22,10 +22,10 @@ def leer_serial():
         # El resultado es una tupla con el pack recibido Ej: (header, contador, temperatura, checksum)
 
 
-        header, velocidad_der, velocidad_izq, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack('<Biiffiiiiiiiiii', raw_data) # asegurate de ajustarlo
+        header, duty_der, duty_izq, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack('<Biiffffiiiiiiii', raw_data) # asegurate de ajustarlo
         if header == 0xAA:
-            print(f"Velocidad derecha: {velocidad_der} | Velocidad izquierda: {velocidad_izq} | teta: {teta}")
-            return (header, velocidad_der, velocidad_izq, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref)
+            print(f"duty derecha: {duty_der} |duty izquierda: {duty_izq} | teta: {teta} | velocidad_izquierda: {v_izq} | velocidad referencia rampa. {v_izq_ref}")
+            return (header, duty_der, duty_izq, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref)
         else:
             # Si el header no coincide, el buffer está desfasado
             esp32.reset_input_buffer()
@@ -46,10 +46,11 @@ def enviar_comando(velocidad_izquierda, velocidad_derecha):
     header = 0xAA
 
     ## #############--------- ACA DEFINES EL PAQUETE A MANDAR ------------- #########
-    paquete = struct.pack('<Biifiiiii', header, velocidad_izquierda, velocidad_derecha, 0,0,0,0,0,0) 
+    paquete = struct.pack('<Biifffiii', header, velocidad_izquierda, velocidad_derecha, 0,0,0.3,0,0,0) 
+                                                #duty der #duty izq , tetaref, vderref, vizqref, vtotal, xref, yref,
 
 
-    ########## 
+
     esp32.write(paquete)
     print(f"Enviado -> Velocidad izquierda: {velocidad_izquierda} | Velocidad derecha: {velocidad_derecha}")
 
@@ -70,7 +71,7 @@ def setupsincro():
             print(lectura.decode('utf-8').rstrip())        
             if lectura.decode('utf-8').rstrip() == "Serial Jetson listo":
                 lectura_final = lectura.decode('utf-8').rstrip()
-                i = 31
+                i = 31 #31 minutos ??
                 break
         except:
             pass
