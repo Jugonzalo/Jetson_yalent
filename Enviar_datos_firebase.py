@@ -80,33 +80,25 @@ client.subscribe(mqtt_topics["estados"]["conexion_esp"])
 # inicio el firebase
 firebase.iniciar_firebase()
 firebase.actualizar_estado(firebase_topics["estados"]["conexion_firebase"], True)
-
-
-
-
 time.sleep(1)
-
 
 ######---------------- VARIABLES ----------------
 estado_esp = False
 
 #### --------------- LECTURA DE DATOS FIREBASE ------------ ############
 i = 0 #usare pa ir viendo ejecuciones
-
-
 while True:
     i+= 1 # variable pa ir contando ciclos
     inicio = time.perf_counter()  #con esto cacho cuanto demora
-
-
-
-
 
 
     # se leen y guardan los valores 
     #----------FIREBASE---------------------------------------------------------------------------
     duty_der = recibido_a_int(firebase.leer_estado(firebase_topics["comandos"]["duty_der"]))
     duty_izq = recibido_a_int(firebase.leer_estado(firebase_topics["comandos"]["duty_izq"]))
+    v_der_ref = recibido_a_float(firebase.leer_estado(firebase_topics["comandos"]["v_der_ref"]))
+    v_izq_ref = recibido_a_float(firebase.leer_estado(firebase_topics["comandos"]["v_izq_ref"]))
+    
     
 
 
@@ -115,15 +107,21 @@ while True:
         estado_esp = recibido_a_bool(firebase.leer_estado(firebase_topics["estados"]["conexion_esp"]))
         print(estado_esp)
         client.publish(mqtt_topics["estados"]["conexion_esp"], estado_esp)
+        #Grabar
+        grabando = recibido_a_int(firebase.leer_estado(firebase_topics["estados"]["grabar"]))  # USARE 1 o 0 mas facil
 
 
 
 
 
 
-    # -------------MQTT----------------------------------------------------------------------------------
+
+    # ------------------------------PUBLICO EN MQTT--------------------------------------------------------------------------
     client.publish(mqtt_topics["comandos"]["duty_der"], duty_der)
     client.publish(mqtt_topics["comandos"]["duty_izq"], duty_izq)
+    client.publish(mqtt_topics["comandos"]["v_der_ref"], v_der_ref)
+    client.publish(mqtt_topics["comandos"]["v_izq_ref"], v_izq_ref)
+    client.publish(mqtt_topics["estados"]["grabar"], grabando)
 
 
 
