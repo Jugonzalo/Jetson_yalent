@@ -14,8 +14,6 @@ def iniciar_firebase():
 })
 
 
-
-
 def _asegurar_firebase_inicializado():
     if not firebase_admin._apps:
         iniciar_firebase()

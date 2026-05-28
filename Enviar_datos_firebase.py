@@ -1,138 +1,111 @@
 import firbase_funciones as firebase
-import os
 import paho.mqtt.client as mqtt
 import time
 from topicos import mqtt_topics, firebase_topics
 
+# ---- Buffer local (se actualiza con cada mensaje MQTT) ----
+telemetria_buffer = {
+    "v_der": 0.0, "v_izq": 0.0, "v_total": 0.0,
+    "teta": 0.0, "omega": 0.0, "x": 0, "y": 0,
+    "d_pared_der": 0.0, "d_pared_izq": 0.0,
+    "d_pared_trasera": 0.0, "pilas": 0.0
+}
 
-
-
-
-
-def recibido_a_float(objeto_firebase):
-    if objeto_firebase is not None:
-        return float(objeto_firebase)
-    else:
-        print("error_de_lectura")
-        return 0
-    
-def recibido_a_int(objeto_firebase):
-    if objeto_firebase is not None:
-        return int(round(float(objeto_firebase)))
-    else:
-        print("error_de_lectura")
-        return 0
-    
-def recibido_a_bool(objeto_firebase):
-    if objeto_firebase is not None:
-        return bool(objeto_firebase)
-    else:
-        print("error_de_lectura")
-        return 0
-
-
-
-
-######### -----------------TOPICOS MQTT --------------#################
-
-
-############ -------- ACCIONES A REALIZAR CUANDO RECIBE DATOS -----------------############
-
-
+TIPO_CAMPO = {
+    "v_der": float, "v_izq": float, "v_total": float,
+    "teta": float, "omega": float,
+    "x": lambda v: int(round(float(v))),
+    "y": lambda v: int(round(float(v))),
+    "d_pared_der": float, "d_pared_izq": float,
+    "d_pared_trasera": float, "pilas": float
+}
 
 def on_message(client, userdata, msg):
-    #print(f"Mensaje recibido en {msg.topic}: {msg.payload.decode()}")
-    #if msg.topic == "robot/v_derecha":
-     #   firebase.actualizar_estado("/Escritura/Potencia_derecha", int(round(float(msg.payload.decode()))))
-    #elif msg.topic == "robot/v_izquierda":
-    #    firebase.actualizar_estado("/Escritura/Potencia_izquierda", int(round(float(msg.payload.decode()))))
-    if msg.topic == mqtt_topics["estados"]["estado_esp"]:
-        texto = msg.payload.decode().strip().lower()
-        valor = texto in ("true", "1", "yes", "on")
-        estado_esp = valor
-        firebase.actualizar_estado(firebase_topics["estados"]["estado_esp"], estado_esp)
+    payload = msg.payload.decode()
+    for campo, topic in mqtt_topics["telemetria"].items():
+        if msg.topic == topic and campo in TIPO_CAMPO:
+            try:
+                telemetria_buffer[campo] = TIPO_CAMPO[campo](payload)
+            except ValueError:
+                print(f"Error parseando {campo}: {payload}")
+            break  # ya encontró el topic, sale del loop
 
-    pass
-
-
-
-
-
-
-
-
-
-
-
-#aca llamai al mqtt
+# ---- Setup MQTT ----
 client = mqtt.Client()
 client.on_message = on_message
 client.connect("localhost", 1883)
-#client.subscribe([("robot/v_derecha", 0), ("robot/v_izquierda", 0)])
 
-
-
-####------------ suscripciones -----------###
-
+for topic in mqtt_topics["telemetria"].values():
+    client.subscribe(topic)
 client.subscribe(mqtt_topics["estados"]["conexion_esp"])
+client.loop_start()
 
-
-# inicio el firebase
+# ---- Setup Firebase ----
 firebase.iniciar_firebase()
 firebase.actualizar_estado(firebase_topics["estados"]["conexion_firebase"], True)
 time.sleep(1)
 
-######---------------- VARIABLES ----------------
-estado_esp = False
+# ---- Variables ----
+estado_esp   = False
+grabando     = 0
+duty_der     = 0
+duty_izq     = 0
+v_der_ref    = 0.0
+v_izq_ref    = 0.0
 
-#### --------------- LECTURA DE DATOS FIREBASE ------------ ############
-i = 0 #usare pa ir viendo ejecuciones
+INTERVALO_TELE    = 0.05   # 10Hz Firebase telemetría
+INTERVALO_CMDS    = 0.05  # 20Hz comandos MQTT
+INTERVALO_ESTADO  = 1.0   # 1Hz estado conexión
+
+t_tele   = t_cmds = t_estado = time.time()
+
+# ---- Loop principal ----
 while True:
-    i+= 1 # variable pa ir contando ciclos
-    inicio = time.perf_counter()  #con esto cacho cuanto demora
+    ahora = time.time()
 
+    # --- Telemetría → Firebase (una sola escritura) ---
+    if ahora - t_tele >= INTERVALO_TELE:
+        firebase.actualizar_estado("Telemetria", {
+            "v_derecha":          telemetria_buffer["v_der"],
+            "v_izquierda":        telemetria_buffer["v_izq"],
+            "v_total":            telemetria_buffer["v_total"],
+            "teta":               telemetria_buffer["teta"],
+            "v_angular":          telemetria_buffer["omega"],
+            "x_pos":              telemetria_buffer["x"],
+            "y_pos":              telemetria_buffer["y"],
+            "d_pared_derecha":    telemetria_buffer["d_pared_der"],
+            "d_pared_izquierda":  telemetria_buffer["d_pared_izq"],
+            "d_pared_trasera":    telemetria_buffer["d_pared_trasera"],
+            "pilas":              telemetria_buffer["pilas"],
+        })
+        t_tele = ahora
 
-    # se leen y guardan los valores 
-    #----------FIREBASE---------------------------------------------------------------------------
-    duty_der = recibido_a_int(firebase.leer_estado(firebase_topics["comandos"]["duty_der"]))
-    duty_izq = recibido_a_int(firebase.leer_estado(firebase_topics["comandos"]["duty_izq"]))
-    v_der_ref = recibido_a_float(firebase.leer_estado(firebase_topics["comandos"]["v_der_ref"]))
-    v_izq_ref = recibido_a_float(firebase.leer_estado(firebase_topics["comandos"]["v_izq_ref"]))
-    
-    
+    # --- Comandos MQTT ---
+    if ahora - t_cmds >= INTERVALO_CMDS:
+        try:
+            duty_der  = int(round(float(firebase.leer_estado(firebase_topics["comandos"]["duty_der"]) or 0)))
+            duty_izq  = int(round(float(firebase.leer_estado(firebase_topics["comandos"]["duty_izq"]) or 0)))
+            v_der_ref = float(firebase.leer_estado(firebase_topics["comandos"]["v_der_ref"]) or 0)
+            v_izq_ref = float(firebase.leer_estado(firebase_topics["comandos"]["v_izq_ref"]) or 0)
+        except Exception as e:
+            print(f"Error leyendo comandos: {e}")
 
+        client.publish(mqtt_topics["comandos"]["duty_der"],  duty_der)
+        client.publish(mqtt_topics["comandos"]["duty_izq"],  duty_izq)
+        client.publish(mqtt_topics["comandos"]["v_der_ref"], v_der_ref)
+        client.publish(mqtt_topics["comandos"]["v_izq_ref"], v_izq_ref)
+        client.publish(mqtt_topics["estados"]["grabar"],     grabando)
+        t_cmds = ahora
 
-    if i%10 == 0: # -------DATOS QUE NO QUIERO FULL LATENCIA 
-        firebase.actualizar_estado(firebase_topics["estados"]["conexion_firebase"], True) #estado de conexion del firebase
-        estado_esp = recibido_a_bool(firebase.leer_estado(firebase_topics["estados"]["conexion_esp"]))
-        print(estado_esp)
-        client.publish(mqtt_topics["estados"]["conexion_esp"], estado_esp)
-        #Grabar
-        grabando = recibido_a_int(firebase.leer_estado(firebase_topics["estados"]["grabar"]))  # USARE 1 o 0 mas facil
+    # --- Estado conexión (baja frecuencia) ---
+    if ahora - t_estado >= INTERVALO_ESTADO:
+        try:
+            firebase.actualizar_estado(firebase_topics["estados"]["conexion_firebase"], True)
+            estado_esp = bool(firebase.leer_estado(firebase_topics["estados"]["conexion_esp"]))
+            grabando   = int(firebase.leer_estado(firebase_topics["estados"]["grabar"]) or 0)
+            client.publish(mqtt_topics["estados"]["conexion_esp"], estado_esp)
+        except Exception as e:
+            print(f"Error estado: {e}")
+        t_estado = ahora
 
-
-
-
-
-
-
-    # ------------------------------PUBLICO EN MQTT--------------------------------------------------------------------------
-    client.publish(mqtt_topics["comandos"]["duty_der"], duty_der)
-    client.publish(mqtt_topics["comandos"]["duty_izq"], duty_izq)
-    client.publish(mqtt_topics["comandos"]["v_der_ref"], v_der_ref)
-    client.publish(mqtt_topics["comandos"]["v_izq_ref"], v_izq_ref)
-    client.publish(mqtt_topics["estados"]["grabar"], grabando)
-
-
-
-    
-
-
-
-
-
-
-    #pa ver el tiempo
-    duracion = time.perf_counter() - inicio
-
-    time.sleep(0.01) #La esp supongamos que lee y manda a 10hz, por lo que la lectura deberia ir mas o menos al mismo rango
+    time.sleep(0.01)
