@@ -5,6 +5,41 @@ import paho.mqtt.client as mqtt
 from topicos import mqtt_topics, firebase_topics
 import csv
 
+# ---------------------- CONFIGURACIÓN ----------------------
+#puerto = "/dev/ttyUSB0"    # Jetson
+puerto = 'COM12'         # Windows
+baudios = 115200
+packet_size = 57           # Paquete que que envia la esp32
+MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al inicio
+HEADER_BYTE = 0xAA         # Byte de inicio del paquete, debe coincidir con el de la ESP32
+TIMEOUT_ESP = 10  # segundos
+
+
+# ---------------------- VARIABLES GLOBALES ----------------------
+#Referencias
+duty_der_ref = duty_izq_ref = 0
+teta_ref = v_der_ref = v_izq_ref = v_total_ref = x_ref = y_ref = 0.0
+#comandos de estado
+esp_conectada = 0    #se ejecuta con sincro/ me falta cachar si es que puedo captar cuando muere
+grabando = 0
+tiempo_grabando = 0
+ejecutando = 1       #Ejecuta el programa entero
+reinicio = 0         #Desconecta la esp espera un rato y vuelve a conectar
+
+
+#PERIOD (CADA CUANTOS CILCOS QUIERO LEER)
+periodo = 2
+# INICIO LAS VARIABLES DE LECTURA EN 0
+Header = duty_der_leido = duty_izq_leido = teta_leido = teta_ref_leido = v_der_leido = v_izq_leido = v_der_ref_leido = v_izq_ref_leido = v_total_leido = v_total_ref_leido = x_pos_leido = y_pos_leido = x_ref_leido = y_ref_leido = 0
+leyo = False
+
+#--------------------------------------CONFIG CSV----------------------------------------
+archivo_csv = open('datos_esp32.csv', 'w', newline='')
+writer = csv.writer(archivo_csv, delimiter=';')
+#FILAS DEL EXCEL
+writer.writerow(['timestamp', 'duty_der', 'duty_izq',  'velocidad_der','velocidad_der_ref', 'velocidad_izq', 'velocidad_izq_ref', 'teta','teta_ref', 'x_pos', 'x_ref', 'y_pos', 'y_ref'])
+
+
 
  ####--------------FUNCIONES-------------------
 def leer_serial():
@@ -21,7 +56,7 @@ def leer_serial():
         # Desempaquetamos los bytes
         # El resultado es una tupla con el pack recibido Ej: (header, contador, temperatura, checksum)
         header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack('<Biiffffiiiiiiii', raw_data) # asegurate de ajustarlo
-        if header == 0xAA:
+        if header == HEADER_BYTE:
             return True, header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
         else:
             # Si el header no coincide, el buffer está desfasado
@@ -39,66 +74,57 @@ def enviar_comando(duty_der_ref, duty_izq_ref, teta_ref, v_der_ref, v_izq_ref, v
     # f : float (Velocidad deseada)
 
     ###mmmmmm cual sera la forma mas inteligente de hacer esto.......###
-    header = 0xAA
 
     ## #############--------- ACA DEFINES EL PAQUETE A MANDAR ------------- #########
-    paquete = struct.pack('<Biifffiii', header,duty_der_ref, duty_izq_ref, teta_ref, v_der_ref, v_izq_ref, v_total_ref, x_ref, y_ref) 
-                                                #duty der #duty izq , tetaref, vderref, vizqref, vtotal, xref, yref,
-
+    paquete = struct.pack(
+        '<Biiffffff',
+        HEADER_BYTE,
+        duty_der_ref, duty_izq_ref,
+        teta_ref, v_der_ref, v_izq_ref, v_total_ref,
+        x_ref, y_ref
+    )
     esp32.write(paquete)
 
 
-def setupsincro():
-    #conecto la esp
-    esp32 = serial.Serial(puerto, baudios, timeout=1)
-    #esp32.dtr = False
-    #esp32.rts = False
-    #esp32.flushInput()
-    time.sleep(0.5)
-    
-    # Forzar reset de la ESP32
-    #esp32.dtr = True
-    time.sleep(0.1)
-    #esp32.dtr = False
-    time.sleep(2)  # Esperar que bootee y mande el mensaje
-    #esp32.flushInput()
-    #la esp deberia mandar un texto diciendo que esta lista
-    for i in range(100):
-        lectura = esp32.readline()
 
-
-        try: 
-            print(lectura.decode('utf-8').rstrip())        
-            if lectura.decode('utf-8').rstrip() == "Serial Jetson listo":
-                lectura_final = lectura.decode('utf-8').rstrip()
-                i = 31 #31 minutos ??
-                break
-        except:
-            pass
-        print(i)
-
-
-
-
+def setupsincro(intento = 1):
+    #Chequeo si no supere intentos maximos
+    if intento > MAX_REINTENTOS_SYNC:
+        raise RuntimeError(f"No se pudo sincronizar con la ESP32 tras {MAX_REINTENTOS_SYNC} intentos")
+    print(f"[SYNC] Intento {intento}/{MAX_REINTENTOS_SYNC}...")
     try:
-        if lectura_final != "Serial Jetson listo": #Si el texto no se leyo correctamente
-        # puede haber un desfase por lo que se reinicia
-            print("no se conecto bien, reinicio")
+            #conecto la esp
+            esp32 = serial.Serial(puerto, baudios, timeout=2)
+            #espero los beats basura
+            time.sleep(2)
+            esp32.reset_input_buffer()
+            #la esp deberia mandar un texto diciendo que esta lista
 
+            deadline = time.time() + 10  # Timeout de 10 segundos para sincronizar
+
+            while time.time() < deadline:
+                linea_raw = esp32.readline()
+                if not linea_raw:
+                    continue
+                try:
+                    linea = linea_raw.decode('utf-8').strip()
+                    print(f"[SYNC] ESP32 dice: '{linea}'")
+                    if linea == "Serial Jetson listo":
+                        print("[SYNC] Sincronización exitosa")
+                        return esp32
+                except UnicodeDecodeError:
+                    pass  # Puede haber basura binaria al inicio, ignorar
+
+            # Timeout: cerrar e intentar de nuevo
+            print("[SYNC] Timeout esperando respuesta. Reintentando...")
             esp32.close()
-            time.sleep(1)
 
-            #con gracia divina la funcion se ejecuta infinitamente hasta que funcione
-            return setupsincro()
+    except serial.SerialException as e:
+        print(f"[SYNC] Error abriendo puerto: {e}")
 
-
-        # cuando funciona se ejecuta esto
-        print("Sincronización completa. Comenzando a enviar comandos...")
-    except:
+        time.sleep(1)
         esp32.close()
-        setupsincro()
-    return esp32
-
+        return setupsincro(intento + 1)
 
 
 def on_message(client, userdata, msg):
@@ -138,6 +164,13 @@ def on_message(client, userdata, msg):
         global grabando
         grabando = int(round(float(msg.payload.decode())))  # USARE 1 o 0 mas facil
 
+    if msg.topic == mqtt_topics["estados"]["reinicio"]:
+        global reinicio
+        reinicio = int(round(float(msg.payload.decode())))  # USARE 1 o 0 mas facil
+    if msg.topic == mqtt_topics["estados"]["ejecutando"]:
+        global ejecutando
+        ejecutando = int(round(float(msg.payload.decode())))  # USARE 1 o 0 mas facil
+
 
 
 
@@ -148,27 +181,6 @@ def on_message(client, userdata, msg):
 client = mqtt.Client()
 client.on_message = on_message  
 client.connect("localhost", 1883)
-
-
-
-#--------------------------------------Serial----------------------------------------
-# CONFIGURA EL PUERTO PARA WINDOWS
-puerto = 'COM12' #ACTIVA ACA PA WINOWS
-baudios = 115200
-
-
-#CONFIGURA EL PUERTO PARA JETSON
-#puerto = "/dev/ttyUSB0"  # ACTIVA ACA PA JETSON
-
-
-
-
-#--------------------------------------CONFIG CSV----------------------------------------
-archivo_csv = open('datos_esp32.csv', 'w', newline='')
-writer = csv.writer(archivo_csv, delimiter=';')
-#FILAS DEL EXCEL
-writer.writerow(['timestamp', 'duty_der', 'duty_izq',  'velocidad_der','velocidad_der_ref', 'velocidad_izq', 'velocidad_izq_ref', 'teta','teta_ref', 'x_pos', 'x_ref', 'y_pos', 'y_ref'])
-
 
 
 ### -------------------------SUSCRIPCIONES ----------------------------
@@ -182,89 +194,118 @@ client.subscribe(mqtt_topics["comandos"]["v_total_ref"])
 client.subscribe(mqtt_topics["comandos"]["x_ref"])
 client.subscribe(mqtt_topics["comandos"]["y_ref"])
 client.subscribe(mqtt_topics["estados"]["grabar"])
+client.subscribe(mqtt_topics["estados"]["ejecutando"])
+client.subscribe(mqtt_topics["estados"]["reinicio"])
 
 
 
-### -------------------------Variables ----------------------------
 
-packet_size = 57  #LARGO DEL PAQUETE A LEER
-esp_conectada = 0
-tiempo_grabando = 0
-grabando = 1
-
-#PERIOD (CADA CUANTOS CILCOS QUIERO LEER)
-periodo = 2
-
-
-# INICIO LAS VARIABLES DE COMANDOS EN 0
-duty_der_ref = duty_izq_ref = teta_ref = v_der_ref = v_izq_ref = v_total_ref = x_ref = y_ref = 0
-# INICIO LAS VARIABLES DE LECTURA EN 0
-Header = duty_der_leido = duty_izq_leido = teta_leido = teta_ref_leido = v_der_leido = v_izq_leido = v_der_ref_leido = v_izq_ref_leido = v_total_leido = v_total_ref_leido = x_pos_leido = y_pos_leido = x_ref_leido = y_ref_leido = 0
-leyo = False
+# ---------------BUCLE PRINCIPAL----------------
+client.loop_start()  # Inicia el loop de MQTT en un hilo separado:      
+while True:
+    while ejecutando:
+        if  not esp_conectada:
+            esp32 = setupsincro()
+            esp_conectada = 1
+            client.publish(mqtt_topics["estados"]["conexion_esp"], 1)
+            t_inicial = time.time()  
+            i = 0   
+            ultimo_paquete_valido = time.time()  # Para detectar timeout de la ESP32
 
 
-
-if True:
-    esp32 = setupsincro()
-    esp_conectada = 1
-    client.publish(mqtt_topics["estados"]["conexion_esp"], True)
-    client.loop_start()  # Inicia el loop de MQTT en un hilo separado:      
-    t_inicial = time.time()  
-    i = 0   
-
-
-    #INICIO EL BUCLE DE ESPCONECTADA
-    while esp_conectada == 1:
-        #ENVIO LOS COMANDOS
-        enviar_comando(duty_der_ref=duty_der_ref, duty_izq_ref=duty_izq_ref, teta_ref=teta_ref, v_der_ref=v_der_ref, v_izq_ref=v_izq_ref, v_total_ref=v_total_ref, x_ref=x_ref, y_ref=y_ref   )
-        #duty der #duty izq , tetaref, vderref, vizqref, vtotal, xref, yref,
-        if i%periodo == 0:
-            print("-----------------------------------------ENVIO DE COMANDO --------------------------------------------- ")
-            print(f"duty_der: {duty_der_ref} | duty_izq: {duty_izq_ref} | teta_ref: {teta_ref} | v_der_ref: {v_der_ref} | v_izq_ref: {v_izq_ref} | v_total_ref: {v_total_ref} | x_ref: {x_ref} |y_ref: {y_ref} ")
-
-
-        #LEO EL SERIAL1
-        leyo, Header, duty_der_leido, duty_izq_leido, teta_leido, teta_ref_leido, v_der_leido, v_izq_leido, v_der_ref_leido, v_izq_ref_leido, v_total_leido, v_total_ref_leido, x_pos_leido, y_pos_leido, x_ref_leido, y_ref_leido = leer_serial()
-        if leyo:
+        #INICIO EL BUCLE DE ESP CONECTADA
+        if esp_conectada:
+            #ENVIO LOS COMANDOS
+            try: 
+                enviar_comando(duty_der_ref=duty_der_ref, duty_izq_ref=duty_izq_ref,
+                                teta_ref=teta_ref,  v_total_ref=v_total_ref, 
+                                v_der_ref=v_der_ref, v_izq_ref=v_izq_ref,
+                                x_ref=x_ref, 
+                                y_ref=y_ref )
+            except serial.SerialException as e:
+                print(f"Error al enviar comando: {e}")
+                esp_conectada = 0
+                esp32.close()
+                client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
             if i%periodo == 0:
-                print("--------------------------------------------LECTURA ESP------------------------------------------------------")
-                print(f"duty izq: {duty_izq_leido} |duty der: {duty_der_leido} | teta: {teta_leido} | velocidad_izquierda: {v_izq_leido} | velocidad_derecha {v_der_leido}")
-                print('\n \n')
-        else:
-            if i%periodo == 0:
-              print("------------------------------------NO SE LEYO----------------------------------------------")
-        
-        #si el comando grabar esta prendido guarda en el excel
-        if grabando:
-            tiempo_grabando = time.time() - t_inicial
+                print("-----------------------------------------ENVIO DE COMANDO --------------------------------------------- ")
+                print(f"duty_der: {duty_der_ref} | duty_izq: {duty_izq_ref} | teta_ref: {teta_ref} | v_der_ref: {v_der_ref} | v_izq_ref: {v_izq_ref} | v_total_ref: {v_total_ref} | x_ref: {x_ref} |y_ref: {y_ref} ")
+
+
+            #LEO EL SERIAL1
             try:
-                #ESCRIBO EN EL EXCELL
-                writer.writerow([
-                    round(tiempo_grabando, 3),
-                    duty_der_leido,
-                    duty_izq_leido,
-                    v_der_leido,
-                    v_der_ref,
-                    v_izq_leido,
-                    v_izq_ref,
-                    teta_leido,
-                    teta_ref,
-                    x_pos_leido,
-                    x_ref,
-                    y_pos_leido,
-                    y_ref,
-                ])
-                #writer.writerow(['timestamp', "duty_der, duty_izq", 'velocidad_der', 'velocidad_izq', 'teta','teta_ref', 'x_pos', 'y_pos'])
-                archivo_csv.flush() # claudio dice
-            except:
-                pass
-        elif not grabando:
-            t_inicial = time.time()
-        i += 1
-        time.sleep(0.5)
+                leyo, Header, duty_der_leido, duty_izq_leido, teta_leido, teta_ref_leido, v_der_leido, v_izq_leido, v_der_ref_leido, v_izq_ref_leido, v_total_leido, v_total_ref_leido, x_pos_leido, y_pos_leido, x_ref_leido, y_ref_leido = leer_serial()
+            except serial.SerialException as e:
+                print(f"Error al leer serial: {e}")
+                leyo = False
+            if leyo:
+                ultimo_paquete_valido = time.time()
+                if i%periodo == 0:
+                    print("--------------------------------------------LECTURA ESP------------------------------------------------------")
+                    print(f"duty izq: {duty_izq_leido} |duty der: {duty_der_leido} | teta: {teta_leido} | velocidad_izquierda: {v_izq_leido} | velocidad_derecha {v_der_leido}")
+                    
+            else:
+                if i%periodo == 0:
+                    print("------------------------------------NO SE LEYO----------------------------------------------")
+                if time.time() - ultimo_paquete_valido > TIMEOUT_ESP:
+                    print(f"ESP32 no responde hace {TIMEOUT_ESP} segundos")
+                    esp_conectada = 0
+                    esp32.close()
+                    client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
 
-    while esp_conectada == 0:
-        esp32.close()
+            
+            #si el comando grabar esta prendido guarda en el excel
+            if grabando:
+                print(grabando)
+                tiempo_grabando = time.time() - t_inicial
+                try:
+                    #ESCRIBO EN EL EXCELL
+                    writer.writerow([
+                        round(tiempo_grabando, 3),
+                        duty_der_leido,
+                        duty_izq_leido,
+                        v_der_leido,
+                        v_der_ref,
+                        v_izq_leido,
+                        v_izq_ref,
+                        teta_leido,
+                        teta_ref,
+                        x_pos_leido,
+                        x_ref,
+                        y_pos_leido,
+                        y_ref,
+                    ])
+                    archivo_csv.flush() # claudio dice
+                    if i%periodo == 0:
+                        print(f"Grabando... Tiempo: {round(tiempo_grabando, 2)}s")
+                except:
+                    pass
+            if not grabando:
+                t_inicial = time.time()
+                if i%periodo == 0:
+                    print("No grabado")
+            i += 1
+            time.sleep(0.5)
+        print('\n \n \n')
+
+
+        #Si se desconecta, el tema es que no se excatamente como captar que se desconecto
+        if not esp_conectada:
+            print("------------------------------------------ESP no conectada------------------------------------------")
+            client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
+            print(input("Presiona Enter para intentar reconectar..."))
+            esp32 = setupsincro()
+            esp_conectada = 1
+            client.publish(mqtt_topics["estados"]["conexion_esp"], 1)
+            t_inicial = time.time()  
+            i = 0 
+            ultimo_paquete_valido = time.time()  
+
+
+            
+
+    while not ejecutando:
+        print("Programa detenido")
+        time.sleep(10)
         pass
-
 
