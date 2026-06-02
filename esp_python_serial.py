@@ -167,8 +167,8 @@ baudios = 115200
 archivo_csv = open('datos_esp32.csv', 'w', newline='')
 writer = csv.writer(archivo_csv, delimiter=';')
 #FILAS DEL EXCEL
-writer.writerow(['timestamp', 'duty_der', 'duty_izq', 'velocidad_der', 'velocidad_izq', 'teta',
-                 'teta_ref', 'x_pos', 'y_pos'])
+writer.writerow(['timestamp', 'duty_der', 'duty_izq',  'velocidad_der','velocidad_der_ref', 'velocidad_izq', 'velocidad_izq_ref', 'teta','teta_ref', 'x_pos', 'x_ref', 'y_pos', 'y_ref'])
+
 
 
 ### -------------------------SUSCRIPCIONES ----------------------------
@@ -190,7 +190,7 @@ client.subscribe(mqtt_topics["estados"]["grabar"])
 packet_size = 57  #LARGO DEL PAQUETE A LEER
 esp_conectada = 0
 tiempo_grabando = 0
-grabando = 0
+grabando = 1
 
 #PERIOD (CADA CUANTOS CILCOS QUIERO LEER)
 periodo = 2
@@ -239,7 +239,21 @@ if True:
             tiempo_grabando = time.time() - t_inicial
             try:
                 #ESCRIBO EN EL EXCELL
-                writer.writerow([round(tiempo_grabando, 3), duty_der_leido, duty_izq_leido, v_der_leido, v_izq_leido, teta_leido, teta_ref_leido, x_pos_leido, y_pos_leido])
+                writer.writerow([
+                    round(tiempo_grabando, 3),
+                    duty_der_leido,
+                    duty_izq_leido,
+                    v_der_leido,
+                    v_der_ref,
+                    v_izq_leido,
+                    v_izq_ref,
+                    teta_leido,
+                    teta_ref,
+                    x_pos_leido,
+                    x_ref,
+                    y_pos_leido,
+                    y_ref,
+                ])
                 #writer.writerow(['timestamp', "duty_der, duty_izq", 'velocidad_der', 'velocidad_izq', 'teta','teta_ref', 'x_pos', 'y_pos'])
                 archivo_csv.flush() # claudio dice
             except:

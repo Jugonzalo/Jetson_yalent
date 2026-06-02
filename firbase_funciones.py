@@ -6,7 +6,7 @@ import os
 
 
 def iniciar_firebase():
-    archivo = os.path.join(os.path.dirname(__file__), 'project-yalent-firebase-adminsdk-fbsvc-f8d16650b8.json')
+    archivo = os.path.join(os.path.dirname(__file__), 'project-yalent-firebase-adminsdk-fbsvc-f89624ed11.json')
     print(archivo)
     cred = credentials.Certificate(archivo)
     firebase_admin.initialize_app(cred, {
