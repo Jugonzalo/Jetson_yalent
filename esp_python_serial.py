@@ -6,8 +6,12 @@ from topicos import mqtt_topics, firebase_topics
 import csv
 
 # ---------------------- CONFIGURACIÓN ----------------------
-#puerto = "/dev/ttyUSB0"    # Jetson
-puerto = 'COM12'         # Windows
+
+puerto = input("escribe j si estas en la jetson, cualquier otra letra para windows: ")
+if puerto.lower() == 'j':
+     puerto = "/dev/ttyUSB0"    # Jetson
+else:
+    puerto = 'COM12'         # Windows
 baudios = 115200
 packet_size = 57           # Paquete que que envia la esp32
 MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al inicio
