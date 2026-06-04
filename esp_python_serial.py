@@ -100,7 +100,7 @@ def setupsincro(intento = 1):
             #conecto la esp
             esp32 = serial.Serial(puerto, baudios, timeout=2)
             #espero los beats basura
-            time.sleep(2)
+            #time.sleep(2)
             esp32.reset_input_buffer()
             #la esp deberia mandar un texto diciendo que esta lista
 
