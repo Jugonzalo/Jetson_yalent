@@ -22,7 +22,7 @@ TIMEOUT_ESP = 10  # segundos
 # ---------------------- VARIABLES GLOBALES ----------------------
 #Referencias
 duty_der_ref = duty_izq_ref = 0
-teta_ref = v_der_ref = v_izq_ref = v_total_ref = x_ref = y_ref = 0.0
+teta_ref = w_ref = v_der_ref = v_izq_ref = v_total_ref = x_ref = y_ref = 0.0
 #comandos de estado
 esp_conectada = 0    #se ejecuta con sincro/ me falta cachar si es que puedo captar cuando muere
 grabando = 0
@@ -34,14 +34,14 @@ reinicio = 0         #Desconecta la esp espera un rato y vuelve a conectar
 #PERIOD (CADA CUANTOS CILCOS QUIERO LEER)
 periodo = 2
 # INICIO LAS VARIABLES DE LECTURA EN 0
-Header = duty_der_leido = duty_izq_leido = teta_leido = teta_ref_leido = v_der_leido = v_izq_leido = v_der_ref_leido = v_izq_ref_leido = v_total_leido = v_total_ref_leido = x_pos_leido = y_pos_leido = x_ref_leido = y_ref_leido = 0
+Header = duty_der_leido = duty_izq_leido = teta_leido = teta_ref_leido = w_leido = v_der_leido = v_izq_leido = v_der_ref_leido = v_izq_ref_leido = v_total_leido = v_total_ref_leido = x_pos_leido = y_pos_leido = x_ref_leido = y_ref_leido = 0
 leyo = False
 
 #--------------------------------------CONFIG CSV----------------------------------------
 archivo_csv = open('datos_esp32.csv', 'w', newline='')
 writer = csv.writer(archivo_csv, delimiter=';')
 #FILAS DEL EXCEL
-writer.writerow(['timestamp', 'duty_der', 'duty_izq',  'velocidad_der','velocidad_der_ref', 'velocidad_izq', 'velocidad_izq_ref', 'teta','teta_ref', 'x_pos', 'x_ref', 'y_pos', 'y_ref'])
+writer.writerow(['timestamp', 'duty_der', 'duty_izq',  'velocidad_der','velocidad_der_ref', 'velocidad_izq', 'velocidad_izq_ref', 'teta','teta_ref', 'w', 'x_pos', 'x_ref', 'y_pos', 'y_ref'])
 
 
 
@@ -59,19 +59,19 @@ def leer_serial():
         raw_data = esp32.read(packet_size)
         # Desempaquetamos los bytes
         # El resultado es una tupla con el pack recibido Ej: (header, contador, temperatura, checksum)
-        header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack('<Biiffffiiiiiiii', raw_data) # asegurate de ajustarlo
+        header, duty_izq, duty_der, teta, teta_ref, w, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack('<Biiffffiiiiiiii', raw_data) # asegurate de ajustarlo
         if header == HEADER_BYTE:
-            return True, header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
+            return True, header, duty_izq, duty_der, teta, teta_ref, w, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
         else:
             # Si el header no coincide, el buffer está desfasado
             esp32.reset_input_buffer()
             return False, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     else:
-        return False, 0, 0  , 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        return False, 0, 0  , 0, 0, 0, 0, 0, 0,
 
 
 
-def enviar_comando(duty_der_ref, duty_izq_ref, teta_ref, v_der_ref, v_izq_ref, v_total_ref, x_ref, y_ref):
+def enviar_comando(duty_der_ref, duty_izq_ref, teta_ref, w_ref, v_der_ref, v_izq_ref, v_total_ref, x_ref, y_ref):
     # < : Little-Endian
     # B : unsigned char (Header 0xAA)
     # i : int32 (ID del comando)x
@@ -81,10 +81,10 @@ def enviar_comando(duty_der_ref, duty_izq_ref, teta_ref, v_der_ref, v_izq_ref, v
 
     ## #############--------- ACA DEFINES EL PAQUETE A MANDAR ------------- #########
     paquete = struct.pack(
-        '<Biiffffff',
+        '<Biifffffff',
         HEADER_BYTE,
         duty_der_ref, duty_izq_ref,
-        teta_ref, v_der_ref, v_izq_ref, v_total_ref,
+        teta_ref, w_ref, v_der_ref, v_izq_ref, v_total_ref,
         x_ref, y_ref
     )
     esp32.write(paquete)
