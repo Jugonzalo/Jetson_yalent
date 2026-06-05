@@ -100,11 +100,18 @@ def setupsincro(intento = 1):
             #conecto la esp
             esp32 = serial.Serial(puerto, baudios, timeout=2)
             #espero los beats basura
-            #time.sleep(2)
             esp32.reset_input_buffer()
             #la esp deberia mandar un texto diciendo que esta lista
 
             deadline = time.time() + 10  # Timeout de 10 segundos para sincronizar
+            #Fuerza reset
+
+            esp32.dtr = False
+            esp32.rts = False
+            time.sleep(0.1)
+            esp32.dtr = True  # Este pulso resetea la ESP32
+            time.sleep(2)     # Esperar boot
+            esp32.reset_input_buffer()
 
             while time.time() < deadline:
                 linea_raw = esp32.readline()
