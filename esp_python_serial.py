@@ -5,6 +5,46 @@ import paho.mqtt.client as mqtt
 from topicos import mqtt_topics, firebase_topics
 import csv
 
+<<<<<<< Updated upstream
+=======
+# ---------------------- CONFIGURACIÓN ----------------------
+
+puerto = input("escribe j si estas en la jetson, cualquier otra letra para windows: ")
+if puerto.lower() == 'j':
+     puerto = "/dev/ttyUSB0"    # Jetson
+else:
+    puerto = 'COM12'         # Windows
+baudios = 115200
+packet_size = 61           # Paquete que que envia la esp32
+MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al inicio
+HEADER_BYTE = 0xAA         # Byte de inicio del paquete, debe coincidir con el de la ESP32
+TIMEOUT_ESP = 10  # segundos
+
+
+# ---------------------- VARIABLES GLOBALES ----------------------
+#Referencias
+duty_der_ref = duty_izq_ref = 0
+teta_ref = w_ref = v_der_ref = v_izq_ref = v_total_ref = x_ref = y_ref = 0.0
+#comandos de estado
+esp_conectada = 0    #se ejecuta con sincro/ me falta cachar si es que puedo captar cuando muere
+grabando = 0
+tiempo_grabando = 0
+ejecutando = 1       #Ejecuta el programa entero
+reinicio = 0         #Desconecta la esp espera un rato y vuelve a conectar
+
+
+#PERIOD (CADA CUANTOS CILCOS QUIERO LEER)
+periodo = 2
+# INICIO LAS VARIABLES DE LECTURA EN 0
+Header = duty_der_leido = duty_izq_leido = teta_leido = teta_ref_leido = w_leido = v_der_leido = v_izq_leido = v_der_ref_leido = v_izq_ref_leido = v_total_leido = v_total_ref_leido = x_pos_leido = y_pos_leido = x_ref_leido = y_ref_leido = 0
+leyo = False
+
+#--------------------------------------CONFIG CSV----------------------------------------
+archivo_csv = open('datos_esp32.csv', 'w', newline='')
+writer = csv.writer(archivo_csv, delimiter=';')
+#FILAS DEL EXCEL
+writer.writerow(['timestamp', 'duty_der', 'duty_izq',  'velocidad_der','velocidad_der_ref', 'velocidad_izq', 'velocidad_izq_ref', 'teta','teta_ref', 'x_pos', 'x_ref', 'y_pos', 'y_ref'])
+>>>>>>> Stashed changes
 
  ####--------------FUNCIONES-------------------
 def leer_serial():
@@ -15,20 +55,34 @@ def leer_serial():
         #raw_data = esp32.read(packet_size)
         #print(esp32.in_waiting) 
         # NO se pa que chucha tenia esto xd
-
+  
     if esp32.in_waiting >= packet_size:
         raw_data = esp32.read(packet_size)
+        print(packet_size)
         # Desempaquetamos los bytes
         # El resultado es una tupla con el pack recibido Ej: (header, contador, temperatura, checksum)
+<<<<<<< Updated upstream
         header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack('<Biiffffiiiiiiii', raw_data) # asegurate de ajustarlo
         if header == 0xAA:
             return True, header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
+=======
+        header, duty_izq, duty_der, teta, teta_ref, w, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack('<Biifffffffffffff', raw_data) # asegurate de ajustarlo
+        if header == HEADER_BYTE:
+            
+            return True, header, duty_izq, duty_der, teta, teta_ref, w, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
+>>>>>>> Stashed changes
         else:
             # Si el header no coincide, el buffer está desfasado
+            print(header)
             esp32.reset_input_buffer()
-            return False, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            return False, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0
     else:
+<<<<<<< Updated upstream
         return False, 0, 0  , 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+=======
+
+        return False, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0
+>>>>>>> Stashed changes
 
 
 
@@ -138,6 +192,19 @@ def on_message(client, userdata, msg):
         global grabando
         grabando = int(round(float(msg.payload.decode())))  # USARE 1 o 0 mas facil
 
+<<<<<<< Updated upstream
+=======
+    if msg.topic == mqtt_topics["estados"]["reinicio"]:
+        global reinicio
+        reinicio = int(round(float(msg.payload.decode())))  # USARE 1 o 0 mas facil
+    if msg.topic == mqtt_topics["estados"]["ejecutando"]:
+        global ejecutando
+        ejecutando = int(round(float(msg.payload.decode())))  # USARE 1 o 0 mas facil
+    if msg.topic == mqtt_topics["comandos"]["w_ref"]:
+        global w_ref
+        w_ref = float(msg.payload.decode())
+
+>>>>>>> Stashed changes
 
 
 
@@ -182,6 +249,12 @@ client.subscribe(mqtt_topics["comandos"]["v_total_ref"])
 client.subscribe(mqtt_topics["comandos"]["x_ref"])
 client.subscribe(mqtt_topics["comandos"]["y_ref"])
 client.subscribe(mqtt_topics["estados"]["grabar"])
+<<<<<<< Updated upstream
+=======
+client.subscribe(mqtt_topics["estados"]["ejecutando"])
+client.subscribe(mqtt_topics["estados"]["reinicio"])
+client.subscribe(mqtt_topics["comandos"]["w_ref"])
+>>>>>>> Stashed changes
 
 
 
@@ -196,6 +269,7 @@ grabando = 0
 periodo = 2
 
 
+<<<<<<< Updated upstream
 # INICIO LAS VARIABLES DE COMANDOS EN 0
 duty_der_ref = duty_izq_ref = teta_ref = v_der_ref = v_izq_ref = v_total_ref = x_ref = y_ref = 0
 # INICIO LAS VARIABLES DE LECTURA EN 0
@@ -226,6 +300,21 @@ if True:
         #LEO EL SERIAL1
         leyo, Header, duty_der_leido, duty_izq_leido, teta_leido, teta_ref_leido, v_der_leido, v_izq_leido, v_der_ref_leido, v_izq_ref_leido, v_total_leido, v_total_ref_leido, x_pos_leido, y_pos_leido, x_ref_leido, y_ref_leido = leer_serial()
         if leyo:
+=======
+        #INICIO EL BUCLE DE ESP CONECTADA
+        if esp_conectada:
+            #ENVIO LOS COMANDOS
+            try: 
+                enviar_comando(duty_der_ref=duty_der_ref, duty_izq_ref=duty_izq_ref,
+                        teta_ref=teta_ref, w_ref=w_ref, v_total_ref=v_total_ref,
+                        v_der_ref=v_der_ref, v_izq_ref=v_izq_ref,
+                        x_ref=x_ref, y_ref=y_ref)
+            except serial.SerialException as e:
+                print(f"Error al enviar comando: {e}")
+                esp_conectada = 0
+                esp32.close()
+                client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
+>>>>>>> Stashed changes
             if i%periodo == 0:
                 print("--------------------------------------------LECTURA ESP------------------------------------------------------")
                 print(f"duty izq: {duty_izq_leido} |duty der: {duty_der_leido} | teta: {teta_leido} | velocidad_izquierda: {v_izq_leido} | velocidad_derecha {v_der_leido}")
@@ -238,6 +327,7 @@ if True:
         if grabando:
             tiempo_grabando = time.time() - t_inicial
             try:
+<<<<<<< Updated upstream
                 #ESCRIBO EN EL EXCELL
                 writer.writerow([round(tiempo_grabando, 3), duty_der_leido, duty_izq_leido, v_der_leido, v_izq_leido, teta_leido, teta_ref_leido, x_pos_leido, y_pos_leido])
                 #writer.writerow(['timestamp', "duty_der, duty_izq", 'velocidad_der', 'velocidad_izq', 'teta','teta_ref', 'x_pos', 'y_pos'])
@@ -251,6 +341,81 @@ if True:
 
     while esp_conectada == 0:
         esp32.close()
+=======
+                leyo, Header, duty_izq_leido, duty_der_leido, teta_leido, teta_ref_leido, w_leido, v_der_leido, v_izq_leido, v_der_ref_leido, v_izq_ref_leido, v_total_leido, v_total_ref_leido, x_pos_leido, y_pos_leido, x_ref_leido, y_ref_leido = leer_serial()
+            except serial.SerialException as e:
+                print(f"Error al leer serial: {e}")
+                leyo = False
+            if leyo:
+                ultimo_paquete_valido = time.time()
+                if i%periodo == 0:
+                    print("--------------------------------------------LECTURA ESP------------------------------------------------------")
+                    print(f"duty izq: {duty_izq_leido} |duty der: {duty_der_leido} | teta: {teta_leido} | velocidad_izquierda: {v_izq_leido} | velocidad_derecha {v_der_leido}")
+                    
+            else:
+                if i%periodo == 0:
+                    print("------------------------------------NO SE LEYO----------------------------------------------")
+                if time.time() - ultimo_paquete_valido > TIMEOUT_ESP:
+                    print(f"ESP32 no responde hace {TIMEOUT_ESP} segundos")
+                    esp_conectada = 0
+                    esp32.close()
+                    client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
+
+            
+            #si el comando grabar esta prendido guarda en el excel
+            if grabando:
+                print(grabando)
+                tiempo_grabando = time.time() - t_inicial
+                try:
+                    #ESCRIBO EN EL EXCELL
+                    writer.writerow([
+                        round(tiempo_grabando, 3),
+                        duty_der_leido,
+                        duty_izq_leido,
+                        v_der_leido,
+                        v_der_ref,
+                        v_izq_leido,
+                        v_izq_ref,
+                        teta_leido,
+                        teta_ref,
+                        x_pos_leido,
+                        x_ref,
+                        y_pos_leido,
+                        y_ref,
+                    ])
+                    archivo_csv.flush() # claudio dice
+                    if i%periodo == 0:
+                        print(f"Grabando... Tiempo: {round(tiempo_grabando, 2)}s")
+                except:
+                    pass
+            if not grabando:
+                t_inicial = time.time()
+                if i%periodo == 0:
+                    print("No grabado")
+            i += 1
+            time.sleep(0.1)
+        print('\n \n \n')
+
+
+        #Si se desconecta, el tema es que no se excatamente como captar que se desconecto
+        if not esp_conectada:
+            print("------------------------------------------ESP no conectada------------------------------------------")
+            client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
+            print(input("Presiona Enter para intentar reconectar..."))
+            esp32 = setupsincro()
+            esp_conectada = 1
+            client.publish(mqtt_topics["estados"]["conexion_esp"], 1)
+            t_inicial = time.time()  
+            i = 0 
+            ultimo_paquete_valido = time.time()  
+
+
+            
+
+    while not ejecutando:
+        print("Programa detenido")
+        time.sleep(10)
+>>>>>>> Stashed changes
         pass
 
 

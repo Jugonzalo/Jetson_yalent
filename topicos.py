@@ -31,6 +31,7 @@ mqtt_topics = {
         "v_der_ref": "robot/comandos/v_der_ref",
         "v_izq_ref": "robot/comandos/v_izq_ref",
         "v_total_ref": "robot/comandos/v_total_ref",
+        "w_ref": "robot/comandos/w_ref",
         "x_ref": "robot/comandos/x_ref",
         "y_ref": "robot/comandos/y_ref",
     },
