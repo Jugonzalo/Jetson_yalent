@@ -59,18 +59,15 @@ def leer_serial():
         raw_data = esp32.read(packet_size)
         # Desempaquetamos los bytes
         # El resultado es una tupla con el pack recibido Ej: (header, contador, temperatura, checksum)
-        header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack('<Biiffffiiiiiiii', raw_data) # asegurate de ajustarlo
-        print(header)
-        print("XD")
+        header, duty_izq, duty_der, teta, teta_ref, w, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack('<Biiffffiiiiiiii', raw_data) # asegurate de ajustarlo
         if header == HEADER_BYTE:
-            return True, header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
+            return True, header, duty_izq, duty_der, teta, teta_ref, w, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
         else:
-            print(header)
             # Si el header no coincide, el buffer está desfasado
             esp32.reset_input_buffer()
             return False, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     else:
-        return False, 0, 0  , 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0
+        return False, 0, 0  , 0, 0, 0, 0, 0, 0,
 
 
 
@@ -103,11 +100,18 @@ def setupsincro(intento = 1):
             #conecto la esp
             esp32 = serial.Serial(puerto, baudios, timeout=2)
             #espero los beats basura
-            #time.sleep(2)
             esp32.reset_input_buffer()
             #la esp deberia mandar un texto diciendo que esta lista
 
             deadline = time.time() + 10  # Timeout de 10 segundos para sincronizar
+            #Fuerza reset
+
+            esp32.dtr = False
+            esp32.rts = False
+            time.sleep(0.1)
+            esp32.dtr = True  # Este pulso resetea la ESP32
+            time.sleep(2)     # Esperar boot
+            esp32.reset_input_buffer()
 
             while time.time() < deadline:
                 linea_raw = esp32.readline()
@@ -225,7 +229,7 @@ while True:
             #ENVIO LOS COMANDOS
             try: 
                 enviar_comando(duty_der_ref=duty_der_ref, duty_izq_ref=duty_izq_ref,
-                                teta_ref=teta_ref, w_ref = w_ref, v_total_ref=v_total_ref, 
+                                teta_ref=teta_ref,  v_total_ref=v_total_ref, 
                                 v_der_ref=v_der_ref, v_izq_ref=v_izq_ref,
                                 x_ref=x_ref, 
                                 y_ref=y_ref )
