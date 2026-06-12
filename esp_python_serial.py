@@ -253,7 +253,28 @@ while True:
                 ultimo_paquete_valido = time.time()
                 if i%periodo == 0:
                     print("--------------------------------------------LECTURA ESP------------------------------------------------------")
-                    print(f"duty izq: {duty_izq_leido} |duty der: {duty_der_leido} | teta: {teta_leido} | velocidad_izquierda: {v_izq_leido} | velocidad_derecha {v_der_leido}")
+                    sep = "+" + "-"*20 + "+" + "-"*15 + "+"
+                    print(sep)
+                    print(f"| {'Parameter':<20} | {'Value':<15} |")
+                    print(sep)
+                    print(f"| {'duty_der':<20} | {duty_der_leido:<15} |")
+                    print(f"| {'duty_izq':<20} | {duty_izq_leido:<15} |")
+                    print(f"| {'teta':<20} | {teta_leido:<15} |")
+                    print(f"| {'teta_ref':<20} | {teta_ref_leido:<15} |")
+                    print(sep)
+                    print(f"| {'v_der':<20} | {v_der_leido:<15} |")
+                    print(f"| {'v_izq':<20} | {v_izq_leido:<15} |")
+                    print(f"| {'v_der_ref':<20} | {v_der_ref_leido:<15} |")
+                    print(f"| {'v_izq_ref':<20} | {v_izq_ref_leido:<15} |")
+                    print(sep)
+                    print(f"| {'v_total':<20} | {v_total_leido:<15} |")
+                    print(f"| {'v_total_ref':<20} | {v_total_ref_leido:<15} |")
+                    print(sep)
+                    print(f"| {'x_pos':<20} | {x_pos_leido:<15} |")
+                    print(f"| {'y_pos':<20} | {y_pos_leido:<15} |")
+                    print(f"| {'x_ref':<20} | {x_ref_leido:<15} |")
+                    print(f"| {'y_ref':<20} | {y_ref_leido:<15} |")
+                    print(sep)
                     
             else:
                 if i%periodo == 0:
