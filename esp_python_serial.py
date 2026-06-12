@@ -13,11 +13,10 @@ if puerto.lower() == 'j':
 else:
     puerto = 'COM12'         # Windows
 baudios = 115200
-packet_size = 57           # Paquete que que envia la esp32
 MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al inicio
 HEADER_BYTE = 0xAA         # Byte de inicio del paquete, debe coincidir con el de la ESP32
 TIMEOUT_ESP = 10  # segundos
-
+estructura= '<Biiffffffffffff'
 
 # ---------------------- VARIABLES GLOBALES ----------------------
 #Referencias
@@ -43,7 +42,7 @@ writer = csv.writer(archivo_csv, delimiter=';')
 #FILAS DEL EXCEL
 writer.writerow(['timestamp', 'duty_der', 'duty_izq',  'velocidad_der','velocidad_der_ref', 'velocidad_izq', 'velocidad_izq_ref', 'teta','teta_ref', 'x_pos', 'x_ref', 'y_pos', 'y_ref'])
 
-
+#--------------------Struct---------------------
 
  ####--------------FUNCIONES-------------------
 def leer_serial():
@@ -54,12 +53,13 @@ def leer_serial():
         #raw_data = esp32.read(packet_size)
         #print(esp32.in_waiting) 
         # NO se pa que chucha tenia esto xd
+    packet_size = struct.calcsize(estructura)
 
     if esp32.in_waiting >= packet_size:
         raw_data = esp32.read(packet_size)
         # Desempaquetamos los bytes
         # El resultado es una tupla con el pack recibido Ej: (header, contador, temperatura, checksum)
-        header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack('<Biiffffiiiiiiii', raw_data) # asegurate de ajustarlo
+        header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack(estructura, raw_data) # asegurate de ajustarlo
         if header == HEADER_BYTE:
             return True, header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
         else:
@@ -314,10 +314,10 @@ while True:
                     pass
             if not grabando:
                 t_inicial = time.time()
-                if i%periodo == 0:
-                    print("No grabado")
+                #if i%periodo == 0:
+                    #print("No grabado")
             i += 1
-            time.sleep(0.5)
+            time.sleep(0.05) #  FRECUENCIA A LA QUE SE LEE Y ENVIA
         print('\n \n \n')
 
 
