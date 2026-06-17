@@ -11,13 +11,13 @@ puerto = input("escribe j si estas en la jetson, cualquier otra letra para windo
 if puerto.lower() == 'j':
      puerto = "/dev/ttyUSB0"    # Jetson
 else:
-    puerto = 'COM12'         # Windows
+    puerto = 'COM5'         # Windows
 baudios = 115200
 MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al inicio
 HEADER_BYTE = 0xAA         # Byte de inicio del paquete, debe coincidir con el de la ESP32
 TIMEOUT_ESP = 10  # segundos
 estructura= '<Biiffffffffffff'
-
+periodo_ejecucion = 0.05
 # ---------------------- VARIABLES GLOBALES ----------------------
 #Referencias
 duty_der_ref = duty_izq_ref = 0
@@ -30,7 +30,7 @@ ejecutando = 1       #Ejecuta el programa entero
 reinicio = 0         #Desconecta la esp espera un rato y vuelve a conectar
 
 
-#PERIOD (CADA CUANTOS CILCOS QUIERO LEER)
+#PERIOD (CADA CUAN°TOS CILCOS QUIERO LEER)
 periodo = 10
 # INICIO LAS VARIABLES DE LECTURA EN 0
 Header = duty_der_leido = duty_izq_leido = teta_leido = teta_ref_leido = v_der_leido = v_izq_leido = v_der_ref_leido = v_izq_ref_leido = v_total_leido = v_total_ref_leido = x_pos_leido = y_pos_leido = x_ref_leido = y_ref_leido = 0
@@ -54,22 +54,20 @@ def leer_serial():
         #print(esp32.in_waiting) 
         # NO se pa que chucha tenia esto xd
     packet_size = struct.calcsize(estructura)
-    last_valid = None
+    paquetes_disponibles = esp32.in_waiting // packet_size
 
-    if esp32.in_waiting >= packet_size:
-        raw_data = esp32.read(packet_size)
+    if paquetes_disponibles > 1:
+        esp32.read((paquetes_disponibles - 1) * packet_size)
+    raw_data = esp32.read(packet_size)
         # Desempaquetamos los bytes
         # El resultado es una tupla con el pack recibido Ej: (header, contador, temperatura, checksum)
-        header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack(estructura, raw_data) # asegurate de ajustarlo
-        if header == HEADER_BYTE:
-            last_valid = (header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref)
-        else:
-            esp32.reset_input_buffer()
-            return False, *([0] * 15)
+    header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack(estructura, raw_data) # asegurate de ajustarlo
 
-    if last_valid:
-        return True, *last_valid
-    return False, *([0] * 15)
+    if header == HEADER_BYTE:
+        return True, header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
+    else:
+        esp32.reset_input_buffer() 
+        return False, *([0] * 15)
 
 
 
@@ -228,6 +226,7 @@ while True:
 
         #INICIO EL BUCLE DE ESP CONECTADA
         if esp_conectada:
+            t_ciclo = time.time()
             #ENVIO LOS COMANDOS
             try: 
                 enviar_comando(duty_der_ref=duty_der_ref, duty_izq_ref=duty_izq_ref,
@@ -247,7 +246,7 @@ while True:
 
             #LEO EL SERIAL1
             try:
-                leyo, Header, duty_der_leido, duty_izq_leido, teta_leido, teta_ref_leido, v_der_leido, v_izq_leido, v_der_ref_leido, v_izq_ref_leido, v_total_leido, v_total_ref_leido, x_pos_leido, y_pos_leido, x_ref_leido, y_ref_leido = leer_serial()
+                leyo, Header, duty_izq_leido, duty_der_leido, teta_leido, teta_ref_leido, v_der_leido, v_izq_leido, v_der_ref_leido, v_izq_ref_leido, v_total_leido, v_total_ref_leido, x_pos_leido, y_pos_leido, x_ref_leido, y_ref_leido = leer_serial()
             except serial.SerialException as e:
                 print(f"Error al leer serial: {e}")
                 leyo = False
@@ -290,7 +289,6 @@ while True:
             
             #si el comando grabar esta prendido guarda en el excel
             if grabando:
-                print(grabando)
                 tiempo_grabando = time.time() - t_inicial
                 try:
                     #ESCRIBO EN EL EXCELL
@@ -299,9 +297,9 @@ while True:
                         duty_der_leido,
                         duty_izq_leido,
                         v_der_leido,
-                        v_der_ref,
+                        v_der_ref_leido,
                         v_izq_leido,
-                        v_izq_ref,
+                        v_izq_ref_leido,
                         teta_leido,
                         teta_ref,
                         x_pos_leido,
@@ -312,13 +310,19 @@ while True:
                     archivo_csv.flush() # claudio dice
                     if i%periodo == 0:
                         print(f"Grabando... Tiempo: {round(tiempo_grabando, 2)}s")
-                except:
-                    pass
+                except Exception as e:
+                    print(f"ERROR CSV: {e}")
+
             if not grabando:
                 t_inicial = time.time()
                 #if i%periodo == 0:
                     #print("No grabado")
             i += 1
+            #Sleep adaptativo
+            elapsed = time.time() - t_ciclo
+            restante = periodo_ejecucion - elapsed
+            if restante > 0:
+                time.sleep(restante)
             time.sleep(0.05) #  FRECUENCIA A LA QUE SE LEE Y ENVIA
 
 
