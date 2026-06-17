@@ -24,14 +24,14 @@ duty_der_ref = duty_izq_ref = 0
 teta_ref = v_der_ref = v_izq_ref = v_total_ref = x_ref = y_ref = 0.0
 #comandos de estado
 esp_conectada = 0    #se ejecuta con sincro/ me falta cachar si es que puedo captar cuando muere
-grabando = 0
+grabando = 0        
 tiempo_grabando = 0
 ejecutando = 1       #Ejecuta el programa entero
 reinicio = 0         #Desconecta la esp espera un rato y vuelve a conectar
 
 
 #PERIOD (CADA CUANTOS CILCOS QUIERO LEER)
-periodo = 2
+periodo = 10
 # INICIO LAS VARIABLES DE LECTURA EN 0
 Header = duty_der_leido = duty_izq_leido = teta_leido = teta_ref_leido = v_der_leido = v_izq_leido = v_der_ref_leido = v_izq_ref_leido = v_total_leido = v_total_ref_leido = x_pos_leido = y_pos_leido = x_ref_leido = y_ref_leido = 0
 leyo = False
@@ -54,6 +54,7 @@ def leer_serial():
         #print(esp32.in_waiting) 
         # NO se pa que chucha tenia esto xd
     packet_size = struct.calcsize(estructura)
+    last_valid = None
 
     if esp32.in_waiting >= packet_size:
         raw_data = esp32.read(packet_size)
@@ -61,13 +62,14 @@ def leer_serial():
         # El resultado es una tupla con el pack recibido Ej: (header, contador, temperatura, checksum)
         header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack(estructura, raw_data) # asegurate de ajustarlo
         if header == HEADER_BYTE:
-            return True, header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
+            last_valid = (header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref)
         else:
-            # Si el header no coincide, el buffer está desfasado
             esp32.reset_input_buffer()
-            return False, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    else:
-        return False, 0, 0  , 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            return False, *([0] * 15)
+
+    if last_valid:
+        return True, *last_valid
+    return False, *([0] * 15)
 
 
 
@@ -318,7 +320,6 @@ while True:
                     #print("No grabado")
             i += 1
             time.sleep(0.05) #  FRECUENCIA A LA QUE SE LEE Y ENVIA
-        print('\n \n \n')
 
 
         #Si se desconecta, el tema es que no se excatamente como captar que se desconecto
