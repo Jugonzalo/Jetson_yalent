@@ -11,7 +11,7 @@ puerto = input("escribe j si estas en la jetson, cualquier otra letra para windo
 if puerto.lower() == 'j':
      puerto = "/dev/ttyUSB0"    # Jetson
 else:
-    puerto = 'COM5'         # Windows
+    puerto = 'COM12'         # Windows
 baudios = 115200
 MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al inicio
 HEADER_BYTE = 0xAA         # Byte de inicio del paquete, debe coincidir con el de la ESP32
@@ -31,9 +31,9 @@ reinicio = 0         #Desconecta la esp espera un rato y vuelve a conectar
 
 
 #PERIOD (CADA CUAN°TOS CILCOS QUIERO LEER)
-periodo = 10
+periodo = 1
 # INICIO LAS VARIABLES DE LECTURA EN 0
-Header = duty_der_leido = duty_izq_leido = teta_leido = teta_ref_leido = v_der_leido = v_izq_leido = v_der_ref_leido = v_izq_ref_leido = v_total_leido = v_total_ref_leido = x_pos_leido = y_pos_leido = x_ref_leido = y_ref_leido = 0
+Header = duty_der_leido = duty_izq_leido = teta_leido = teta_ref_leido = v_der_leido = v_izq_leido = v_der_ref_leido = v_izq_ref_leido = v_total_leido = v_total_ref_leido = x_pos_leido = y_pos_leido = x_ref_leido = y_ref_leido = 0.0
 leyo = False
 
 #--------------------------------------CONFIG CSV----------------------------------------
@@ -83,7 +83,7 @@ def enviar_comando(duty_der_ref, duty_izq_ref, teta_ref, v_der_ref, v_izq_ref, v
     paquete = struct.pack(
         '<Biiffffff',
         HEADER_BYTE,
-        duty_der_ref, duty_izq_ref,
+        duty_izq_ref, duty_der_ref,
         teta_ref, v_der_ref, v_izq_ref, v_total_ref,
         x_ref, y_ref
     )
@@ -297,9 +297,9 @@ while True:
                         duty_der_leido,
                         duty_izq_leido,
                         v_der_leido,
-                        v_der_ref_leido,
+                        v_der_ref,
                         v_izq_leido,
-                        v_izq_ref_leido,
+                        v_izq_ref,
                         teta_leido,
                         teta_ref,
                         x_pos_leido,
