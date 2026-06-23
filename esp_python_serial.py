@@ -252,6 +252,17 @@ while True:
                 leyo = False
             if leyo:
                 ultimo_paquete_valido = time.time()
+
+
+                # =================PUBLICO MQTT ================
+                client.publish(mqtt_topics["telemetria"]["v_der"], v_der_leido)
+                client.publish(mqtt_topics["telemetria"]["v_der"],   v_der_leido)
+                client.publish(mqtt_topics["telemetria"]["v_izq"],   v_izq_leido)
+                client.publish(mqtt_topics["telemetria"]["v_total"], v_total_leido)
+                client.publish(mqtt_topics["telemetria"]["teta"],    teta_leido)
+                client.publish(mqtt_topics["telemetria"]["x"],       x_pos_leido)
+                client.publish(mqtt_topics["telemetria"]["y"],       y_pos_leido)
+
                 if i%periodo == 0:
                     print("--------------------------------------------LECTURA ESP------------------------------------------------------")
                     sep = "+" + "-"*20 + "+" + "-"*15 + "+"
