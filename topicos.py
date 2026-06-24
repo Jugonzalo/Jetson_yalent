@@ -1,5 +1,12 @@
-
 mqtt_topics = {
+    "camara": {
+        "x_cam": "robot/camara/x_cam",
+        "y_cam": "robot/camara/y_cam",
+        "theta_cam": "robot/camara/theta_cam",
+        "d_pared_cam": "robot/camara/d_pared_cam",
+        "nodo_actual": "robot/camara/nodo_actual",
+        "siguiente_nodo": "robot/camara/siguiente_nodo",
+    },
     "telemetria": {
         "v_der": "robot/telemetria/v_der",
         "v_izq": "robot/telemetria/v_izq",

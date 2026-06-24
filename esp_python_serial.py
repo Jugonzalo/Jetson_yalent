@@ -67,7 +67,7 @@ def leer_serial():
         return True, header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
     else:
         esp32.reset_input_buffer() 
-        return False, *([0] * 15)
+        return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
 
 
