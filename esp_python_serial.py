@@ -17,7 +17,7 @@ MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al
 HEADER_BYTE = 0xAA         # Byte de inicio del paquete, debe coincidir con el de la ESP32
 TIMEOUT_ESP = 10  # segundos
 estructura= '<Biiffffffffffff'
-periodo_ejecucion = 0.05
+periodo_ejecucion = 0.01
 # ---------------------- VARIABLES GLOBALES ----------------------
 #Referencias
 duty_der_ref = duty_izq_ref = 0
