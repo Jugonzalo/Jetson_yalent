@@ -17,7 +17,8 @@ MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al
 HEADER_BYTE = 0xAA         # Byte de inicio del paquete, debe coincidir con el de la ESP32
 TIMEOUT_ESP = 10  # segundos
 estructura= '<Biiffffffffffff'
-periodo_ejecucion = 0.01
+FRECUENCIA_LECTURA_MS = 50          # igual que FRECUENCIA_LECTURA en tareas.h
+periodo_ejecucion = FRECUENCIA_LECTURA_MS / 1000.0
 # ---------------------- VARIABLES GLOBALES ----------------------
 #Referencias
 duty_der_ref = duty_izq_ref = 0
@@ -46,28 +47,44 @@ writer.writerow(['timestamp', 'duty_der', 'duty_izq',  'velocidad_der','velocida
 
  ####--------------FUNCIONES-------------------
 def leer_serial():
-
-    # reseteo y espero que lleguen los suficientes datos
-    #while esp32.in_waiting > packet_size:
-        # lee todos los paquetes hasta que solo quede el último completo
-        #raw_data = esp32.read(packet_size)
-        #print(esp32.in_waiting) 
-        # NO se pa que chucha tenia esto xd
     packet_size = struct.calcsize(estructura)
-    paquetes_disponibles = esp32.in_waiting // packet_size
 
-    if paquetes_disponibles > 1:
-        esp32.read((paquetes_disponibles - 1) * packet_size)
-    raw_data = esp32.read(packet_size)
-        # Desempaquetamos los bytes
-        # El resultado es una tupla con el pack recibido Ej: (header, contador, temperatura, checksum)
-    header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack(estructura, raw_data) # asegurate de ajustarlo
+    # Busca el HEADER_BYTE en el stream para realinearse ante cualquier desincronía.
+    # Si no encuentra el header en 2*packet_size bytes, descarta y retorna False.
+    MAX_BUSQUEDA = packet_size * 2
+    buscados = 0
+    while True:
+        if esp32.in_waiting == 0:
+            return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        b = esp32.read(1)
+        if not b:
+            return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        if b[0] == HEADER_BYTE:
+            break
+        buscados += 1
+        if buscados > MAX_BUSQUEDA:
+            print(f"[SYNC] Header no encontrado tras {MAX_BUSQUEDA} bytes, descartando buffer")
+            esp32.reset_input_buffer()
+            return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
-    if header == HEADER_BYTE:
-        return True, header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
-    else:
-        esp32.reset_input_buffer() 
+    # Ya encontramos el HEADER_BYTE, leemos el resto del paquete
+    resto = packet_size - 1
+    raw_resto = esp32.read(resto)
+    if len(raw_resto) < resto:
+        # Lectura incompleta (timeout del puerto serial)
+        print(f"[SERIAL] Paquete incompleto: esperaba {resto} bytes, recibí {len(raw_resto)}")
+        esp32.reset_input_buffer()
         return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+    raw_data = b + raw_resto
+    try:
+        header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref = struct.unpack(estructura, raw_data)
+    except struct.error as e:
+        print(f"[SERIAL] Error de desempaque: {e}")
+        esp32.reset_input_buffer()
+        return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+    return True, header, duty_izq, duty_der, teta, teta_ref, v_der, v_izq, v_der_ref, v_izq_ref, v_total, v_total_ref, x_pos, y_pos, x_ref, y_ref
 
 
 
@@ -129,12 +146,11 @@ def setupsincro(intento = 1):
             # Timeout: cerrar e intentar de nuevo
             print("[SYNC] Timeout esperando respuesta. Reintentando...")
             esp32.close()
+            return setupsincro(intento + 1)
 
     except serial.SerialException as e:
         print(f"[SYNC] Error abriendo puerto: {e}")
-
         time.sleep(1)
-        esp32.close()
         return setupsincro(intento + 1)
 
 
@@ -312,7 +328,7 @@ while True:
                         v_izq_leido,
                         v_izq_ref,
                         teta_leido,
-                        teta_ref,
+                        teta_ref_leido,
                         x_pos_leido,
                         x_ref,
                         y_pos_leido,
@@ -334,7 +350,6 @@ while True:
             restante = periodo_ejecucion - elapsed
             if restante > 0:
                 time.sleep(restante)
-            time.sleep(0.05) #  FRECUENCIA A LA QUE SE LEE Y ENVIA
 
 
         #Si se desconecta, el tema es que no se excatamente como captar que se desconecto
