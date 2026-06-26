@@ -2,7 +2,7 @@ import struct
 import serial
 import time
 import paho.mqtt.client as mqtt
-from topicos import mqtt_topics, firebase_topics
+from topicos import mqtt_topics
 import csv
 
 # ---------------------- CONFIGURACIÓN ----------------------
@@ -12,6 +12,22 @@ if puerto.lower() == 'j':
      puerto = "/dev/ttyUSB0"    # Jetson
 else:
     puerto = 'COM12'         # Windows
+
+
+print("Escoje el modo de uso")
+print("[1] modo duty")
+print("[2] modo velocidad y theta")
+print("[3] modo coordenadas  (delfault apreta cualquier cosa)")
+
+modo_seleccionado = input("Selecciona modo: ")
+
+if modo_seleccionado.lower() == '1':
+    modo_seleccionado = "duty"
+elif modo_seleccionado.lower() == '2':
+    modo_seleccionado = "velocidad"
+else:
+    modo_seleccionado = "coordenadas"
+
 baudios = 115200
 MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al inicio
 HEADER_BYTE = 0xAA         # Byte de inicio del paquete, debe coincidir con el de la ESP32
@@ -19,6 +35,7 @@ TIMEOUT_ESP = 10  # segundos
 estructura= '<Biiffffffffffff'
 FRECUENCIA_LECTURA_MS = 50          # igual que FRECUENCIA_LECTURA en tareas.h
 periodo_ejecucion = FRECUENCIA_LECTURA_MS / 1000.0
+
 # ---------------------- VARIABLES GLOBALES ----------------------
 #Referencias
 duty_der_ref = duty_izq_ref = 0
@@ -109,7 +126,7 @@ def enviar_comando(duty_der_ref, duty_izq_ref, teta_ref, v_der_ref, v_izq_ref, v
 
 
 
-def setupsincro(intento = 1):
+def setupsincro(intento = 1, modo_de_uso = "coordenadas"):
     #Chequeo si no supere intentos maximos
     if intento > MAX_REINTENTOS_SYNC:
         raise RuntimeError(f"No se pudo sincronizar con la ESP32 tras {MAX_REINTENTOS_SYNC} intentos")
@@ -140,19 +157,44 @@ def setupsincro(intento = 1):
                     print(f"[SYNC] ESP32 dice: '{linea}'")
                     if linea == "Serial Jetson listo":
                         print("[SYNC] Sincronización exitosa")
+
+                        #================== Asignacion de Modo ==================== 
+                        # d= duty /////   v = vel //// c = coord
+                        if modo_de_uso == "duty":
+                            esp32.write(b'd')
+                        elif modo_de_uso == "velocidad":
+                            esp32.write(b'v')
+                        elif modo_de_uso == "coordenadas":
+                            esp32.write(b'c')
+
+                        # Leer confirmación del modo que imprime la ESP
+
+                        #saco un jetson listo
+                        esp32.readline().decode()
+                        
+                        #ahora leo la confirmacion de modo
+                        confirmacion_raw = esp32.readline()
+                        try:
+                            confirmacion = confirmacion_raw.decode('utf-8').strip()
+                            print(f"[SYNC] ESP32 confirmó modo: '{confirmacion}'")
+                        except UnicodeDecodeError:
+                            print("[SYNC] No se pudo decodificar confirmación de modo")
+
                         return esp32
+                    
+                    
                 except UnicodeDecodeError:
                     pass  # Puede haber basura binaria al inicio, ignorar
 
             # Timeout: cerrar e intentar de nuevo
             print("[SYNC] Timeout esperando respuesta. Reintentando...")
             esp32.close()
-            return setupsincro(intento + 1)
+            return setupsincro(intento + 1, modo_de_uso=modo_de_uso)
 
     except serial.SerialException as e:
         print(f"[SYNC] Error abriendo puerto: {e}")
         time.sleep(1)
-        return setupsincro(intento + 1)
+        return setupsincro(intento + 1, modo_de_uso= modo_de_uso)
 
 
 def on_message(client, userdata, msg):
@@ -237,18 +279,18 @@ client.loop_start()  # Inicia el loop de MQTT en un hilo separado:
 while True:
     while ejecutando:
         if  not esp_conectada:
-            esp32 = setupsincro()
+            esp32 = setupsincro(modo_de_uso=modo_seleccionado)
             esp_conectada = 1
             client.publish(mqtt_topics["estados"]["conexion_esp"], 1)
             t_inicial = time.time()  
             i = 0   
             ultimo_paquete_valido = time.time()  # Para detectar timeout de la ESP32
 
-
         #INICIO EL BUCLE DE ESP CONECTADA
         if esp_conectada:
             t_ciclo = time.time()
             #ENVIO LOS COMANDOS
+
             try: 
                 enviar_comando(duty_der_ref=duty_der_ref, duty_izq_ref=duty_izq_ref,
                                 teta_ref=teta_ref,  v_total_ref=v_total_ref, 
