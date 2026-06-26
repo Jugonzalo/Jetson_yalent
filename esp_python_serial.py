@@ -29,6 +29,7 @@ grabando = 0
 tiempo_grabando = 0
 ejecutando = 1       #Ejecuta el programa entero
 reinicio = 0         #Desconecta la esp espera un rato y vuelve a conectar
+reset_pos = 0
 
 
 #PERIOD (CADA CUAN°TOS CILCOS QUIERO LEER)
@@ -88,7 +89,7 @@ def leer_serial():
 
 
 
-def enviar_comando(duty_der_ref, duty_izq_ref, teta_ref, v_der_ref, v_izq_ref, v_total_ref, x_ref, y_ref):
+def enviar_comando(duty_der_ref, duty_izq_ref, teta_ref, v_der_ref, v_izq_ref, v_total_ref, x_ref, y_ref, reset_pos):
     # < : Little-Endian
     # B : unsigned char (Header 0xAA)
     # i : int32 (ID del comando)x
@@ -98,11 +99,11 @@ def enviar_comando(duty_der_ref, duty_izq_ref, teta_ref, v_der_ref, v_izq_ref, v
 
     ## #############--------- ACA DEFINES EL PAQUETE A MANDAR ------------- #########
     paquete = struct.pack(
-        '<Biiffffff',
+        '<Biifffffff',
         HEADER_BYTE,
         duty_izq_ref, duty_der_ref,
         teta_ref, v_der_ref, v_izq_ref, v_total_ref,
-        x_ref, y_ref
+        x_ref, y_ref, reset_pos
     )
     esp32.write(paquete)
 
@@ -197,6 +198,9 @@ def on_message(client, userdata, msg):
     if msg.topic == mqtt_topics["estados"]["ejecutando"]:
         global ejecutando
         ejecutando = int(round(float(msg.payload.decode())))  # USARE 1 o 0 mas facil
+    if msg.topic == mqtt_topics["estados"]["flag_pos"]:
+        global reset_pos
+        reset_pos = int(round(float(msg.payload.decode())))
 
 
 
@@ -223,6 +227,7 @@ client.subscribe(mqtt_topics["comandos"]["y_ref"])
 client.subscribe(mqtt_topics["estados"]["grabar"])
 client.subscribe(mqtt_topics["estados"]["ejecutando"])
 client.subscribe(mqtt_topics["estados"]["reinicio"])
+client.subscribe(mqtt_topics["estados"]["flag_pos"])
 
 
 
@@ -249,7 +254,8 @@ while True:
                                 teta_ref=teta_ref,  v_total_ref=v_total_ref, 
                                 v_der_ref=v_der_ref, v_izq_ref=v_izq_ref,
                                 x_ref=x_ref, 
-                                y_ref=y_ref )
+                                y_ref=y_ref,
+                                reset_pos=reset_pos )
             except serial.SerialException as e:
                 print(f"Error al enviar comando: {e}")
                 esp_conectada = 0
