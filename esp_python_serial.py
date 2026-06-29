@@ -343,13 +343,13 @@ while True:
                     print(f"| {'v_der_ref':<20} | {v_der_ref_leido:<15} |")
                     print(f"| {'v_izq_ref':<20} | {v_izq_ref_leido:<15} |")
                     print(sep)
-                    print(f"| {'v_total':<20} | {v_total_leido:<15} |")
+                    print(f"| {'v_total':<20} | {((v_der_leido + v_izq_leido)/2):<15} |")
                     print(f"| {'v_total_ref':<20} | {v_total_ref_leido:<15} |")
                     print(sep)
                     print(f"| {'x_pos':<20} | {x_pos_leido:<15} |")
                     print(f"| {'y_pos':<20} | {y_pos_leido:<15} |")
-                    print(f"| {'x_ref':<20} | {x_ref_leido:<15} |")
-                    print(f"| {'y_ref':<20} | {y_ref_leido:<15} |")
+                    print(f"| {'x_ref':<20} | {x_ref:<15} |")
+                    print(f"| {'y_ref':<20} | {y_ref:<15} |")
                     print(sep)
                     
             else:
@@ -371,10 +371,10 @@ while True:
                         round(tiempo_grabando, 3),
                         duty_der_leido,
                         duty_izq_leido,
-                        v_der_leido,
-                        v_der_ref,
-                        v_izq_leido,
-                        v_izq_ref,
+                        float(v_der_leido),
+                        float(v_der_ref_leido),
+                        float(v_izq_leido),
+                        float(v_izq_ref_leido),
                         teta_leido,
                         teta_ref_leido,
                         x_pos_leido,
