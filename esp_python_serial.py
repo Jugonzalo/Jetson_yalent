@@ -1,6 +1,7 @@
 import struct
 import serial
 import time
+import math
 import paho.mqtt.client as mqtt
 from topicos import mqtt_topics
 import csv
@@ -9,7 +10,7 @@ import csv
 
 puerto = input("escribe j si estas en la jetson, cualquier otra letra para windows: ")
 if puerto.lower() == 'j':
-     puerto = "/dev/ttyUSB0"    # Jetson
+     puerto = "/dev/ttyTHS1"    # Jetson
 else:
     puerto = 'COM12'         # Windows
 
@@ -31,7 +32,8 @@ else:
 baudios = 115200
 MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al inicio
 HEADER_BYTE = 0xAA         # Byte de inicio del paquete, debe coincidir con el de la ESP32
-TIMEOUT_ESP = 10  # segundos
+TIMEOUT_ESP = 3   # segundos
+MAX_FALLOS_SYNC = 30  # 30 ciclos × 50ms = 1.5s sin dato válido → resync suave
 estructura= '<Biiffffffffffff'
 FRECUENCIA_LECTURA_MS = 50          # igual que FRECUENCIA_LECTURA en tareas.h
 periodo_ejecucion = FRECUENCIA_LECTURA_MS / 1000.0
@@ -54,6 +56,8 @@ periodo = 1
 # INICIO LAS VARIABLES DE LECTURA EN 0
 Header = duty_der_leido = duty_izq_leido = teta_leido = teta_ref_leido = v_der_leido = v_izq_leido = v_der_ref_leido = v_izq_ref_leido = v_total_leido = v_total_ref_leido = x_pos_leido = y_pos_leido = x_ref_leido = y_ref_leido = 0.0
 leyo = False
+fallos_sync_consecutivos = 0
+esp32 = None  # Guardián: evita NameError si MQTT activa esp_conectada antes del setup
 
 #--------------------------------------CONFIG CSV----------------------------------------
 archivo_csv = open('datos_esp32.csv', 'w', newline='')
@@ -71,23 +75,28 @@ def leer_serial():
     # Si no encuentra el header en 2*packet_size bytes, descarta y retorna False.
     MAX_BUSQUEDA = packet_size * 2
     buscados = 0
-    while True:
-        if esp32.in_waiting == 0:
-            return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        b = esp32.read(1)
-        if not b:
-            return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        if b[0] == HEADER_BYTE:
-            break
-        buscados += 1
-        if buscados > MAX_BUSQUEDA:
-            print(f"[SYNC] Header no encontrado tras {MAX_BUSQUEDA} bytes, descartando buffer")
-            esp32.reset_input_buffer()
-            return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+    try:
+        while True:
+            if esp32.in_waiting == 0:
+                return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+            b = esp32.read(1)
+            if not b:
+                return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+            if b[0] == HEADER_BYTE:
+                break
+            buscados += 1
+            if buscados > MAX_BUSQUEDA:
+                print(f"[SYNC] Header no encontrado tras {MAX_BUSQUEDA} bytes, descartando buffer")
+                esp32.reset_input_buffer()
+                return False, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
-    # Ya encontramos el HEADER_BYTE, leemos el resto del paquete
-    resto = packet_size - 1
-    raw_resto = esp32.read(resto)
+        # Ya encontramos el HEADER_BYTE, leemos el resto del paquete
+        resto = packet_size - 1
+        raw_resto = esp32.read(resto)
+    except (serial.SerialException, OSError) as e:
+        # USB físicamente desconectado — propagar para que el loop principal haga reconnect
+        raise serial.SerialException(f"Desconexión durante lectura: {e}")
+
     if len(raw_resto) < resto:
         # Lectura incompleta (timeout del puerto serial)
         print(f"[SERIAL] Paquete incompleto: esperaba {resto} bytes, recibí {len(raw_resto)}")
@@ -136,17 +145,17 @@ def setupsincro(intento = 1, modo_de_uso = "coordenadas"):
             esp32 = serial.Serial(puerto, baudios, timeout=2)
             #espero los beats basura
             esp32.reset_input_buffer()
-            #la esp deberia mandar un texto diciendo que esta lista
 
-            deadline = time.time() + 10  # Timeout de 10 segundos para sincronizar
-            #Fuerza reset
+            #Fuerza reset al ESP32 via pulso DTR
+            #esp32.dtr = False
+            #esp32.rts = False
+            #time.sleep(0.1)
+            #esp32.dtr = True  # Este pulso resetea la ESP32
+            #time.sleep(2)     # Esperar boot
+            #esp32.reset_input_buffer()
 
-            esp32.dtr = False
-            esp32.rts = False
-            time.sleep(0.1)
-            esp32.dtr = True  # Este pulso resetea la ESP32
-            time.sleep(2)     # Esperar boot
-            esp32.reset_input_buffer()
+            # Deadline empieza DESPUÉS del reset, para tener los 10s completos
+            deadline = time.time() + 10
 
             while time.time() < deadline:
                 linea_raw = esp32.readline()
@@ -279,42 +288,76 @@ client.loop_start()  # Inicia el loop de MQTT en un hilo separado:
 while True:
     while ejecutando:
         if  not esp_conectada:
-            esp32 = setupsincro(modo_de_uso=modo_seleccionado)
-            esp_conectada = 1
-            client.publish(mqtt_topics["estados"]["conexion_esp"], 1)
-            t_inicial = time.time()  
-            i = 0   
-            ultimo_paquete_valido = time.time()  # Para detectar timeout de la ESP32
+            try:
+                esp32 = setupsincro(modo_de_uso=modo_seleccionado)
+                esp_conectada = 1
+                fallos_sync_consecutivos = 0
+                client.publish(mqtt_topics["estados"]["conexion_esp"], 1)
+                t_inicial = time.time()
+                i = 0
+                ultimo_paquete_valido = time.time()  # Para detectar timeout de la ESP32
+            except RuntimeError as e:
+                print(f"[RECONNECT] {e}. Reintentando en 5 segundos...")
+                time.sleep(5)
+                continue
 
         #INICIO EL BUCLE DE ESP CONECTADA
         if esp_conectada:
             t_ciclo = time.time()
             #ENVIO LOS COMANDOS
 
-            try: 
+            try:
                 enviar_comando(duty_der_ref=duty_der_ref, duty_izq_ref=duty_izq_ref,
-                                teta_ref=teta_ref,  v_total_ref=v_total_ref, 
+                                teta_ref=teta_ref,  v_total_ref=v_total_ref,
                                 v_der_ref=v_der_ref, v_izq_ref=v_izq_ref,
-                                x_ref=x_ref, 
+                                x_ref=x_ref,
                                 y_ref=y_ref,
                                 reset_pos=reset_pos )
-            except serial.SerialException as e:
-                print(f"Error al enviar comando: {e}")
+            except (serial.SerialException, OSError) as e:
+                print(f"[SERIAL] Puerto desconectado al enviar: {e}")
                 esp_conectada = 0
-                esp32.close()
+                try: esp32.close()
+                except: pass
                 client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
+                continue  # CRÍTICO: sin esto el código sigue y accede a esp32 cerrado → crash
             if i%periodo == 0:
                 print("-----------------------------------------ENVIO DE COMANDO --------------------------------------------- ")
                 print(f"duty_der: {duty_der_ref} | duty_izq: {duty_izq_ref} | teta_ref: {teta_ref} | v_der_ref: {v_der_ref} | v_izq_ref: {v_izq_ref} | v_total_ref: {v_total_ref} | x_ref: {x_ref} |y_ref: {y_ref} ")
 
 
             #LEO EL SERIAL1
+            # Solo leer cuando hay datos suficientes para un paquete completo
             try:
-                leyo, Header, duty_izq_leido, duty_der_leido, teta_leido, teta_ref_leido, v_der_leido, v_izq_leido, v_der_ref_leido, v_izq_ref_leido, v_total_leido, v_total_ref_leido, x_pos_leido, y_pos_leido, x_ref_leido, y_ref_leido = leer_serial()
-            except serial.SerialException as e:
-                print(f"Error al leer serial: {e}")
+                bytes_disponibles = esp32.in_waiting
+            except (serial.SerialException, OSError) as e:
+                print(f"[SERIAL] Puerto desconectado en in_waiting: {e}")
+                esp_conectada = 0
+                try: esp32.close()
+                except: pass
+                client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
+                continue
+            if bytes_disponibles >= struct.calcsize(estructura):
+                try:
+                    leyo, Header, duty_izq_leido, duty_der_leido, teta_leido, teta_ref_leido, v_der_leido, v_izq_leido, v_der_ref_leido, v_izq_ref_leido, v_total_leido, v_total_ref_leido, x_pos_leido, y_pos_leido, x_ref_leido, y_ref_leido = leer_serial()
+                except (serial.SerialException, OSError) as e:
+                    print(f"[SERIAL] Puerto desconectado al leer: {e}")
+                    esp_conectada = 0
+                    try: esp32.close()
+                    except: pass
+                    client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
+                    leyo = False
+                    continue
+            else:
                 leyo = False
+            # Descartar paquetes basura (falsa sincronización por 0xAA en medio de un paquete)
+            if leyo and (abs(duty_der_leido) > 500 or abs(duty_izq_leido) > 500 or
+                         not math.isfinite(teta_leido) or not math.isfinite(v_der_leido) or
+                         not math.isfinite(x_pos_leido) or not math.isfinite(y_pos_leido)):
+                print("[SYNC] Paquete inválido descartado (falsa sincronización)")
+                leyo = False
+
             if leyo:
+                fallos_sync_consecutivos = 0
                 ultimo_paquete_valido = time.time()
 
 
@@ -351,11 +394,31 @@ while True:
                     print(f"| {'x_ref':<20} | {x_ref:<15} |")
                     print(f"| {'y_ref':<20} | {y_ref:<15} |")
                     print(sep)
-                    
+
             else:
+                fallos_sync_consecutivos += 1
                 if i%periodo == 0:
                     print("------------------------------------NO SE LEYO----------------------------------------------")
-                if time.time() - ultimo_paquete_valido > TIMEOUT_ESP:
+                if fallos_sync_consecutivos >= MAX_FALLOS_SYNC:
+                    # El ESP32 NO crasheó — solo se perdió sincronización del buffer.
+                    # Cerrar y reabrir el puerto sin resetear el ESP32 (sin pulso DTR).
+                    print(f"[SYNC] Buffer desincronizado, reabriendo puerto serial...")
+                    try: esp32.close()
+                    except: pass
+                    time.sleep(0.3)
+                    try:
+                        esp32 = serial.Serial(puerto, baudios, timeout=2)
+                        esp32.reset_input_buffer()
+                        time.sleep(0.06)  # Esperar ~1 ciclo de paquete
+                        fallos_sync_consecutivos = 0
+                        ultimo_paquete_valido = time.time()
+                        print("[SYNC] Puerto reabierto, buscando sincronización...")
+                    except (serial.SerialException, OSError) as e:
+                        print(f"[SYNC] Error al reabrir puerto ({e}), forzando reconexión completa...")
+                        esp_conectada = 0
+                        client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
+                        fallos_sync_consecutivos = 0
+                elif time.time() - ultimo_paquete_valido > TIMEOUT_ESP:
                     print(f"ESP32 no responde hace {TIMEOUT_ESP} segundos")
                     esp_conectada = 0
                     esp32.close()
@@ -400,17 +463,7 @@ while True:
                 time.sleep(restante)
 
 
-        #Si se desconecta, el tema es que no se excatamente como captar que se desconecto
-        if not esp_conectada:
-            print("------------------------------------------ESP no conectada------------------------------------------")
-            client.publish(mqtt_topics["estados"]["conexion_esp"], 0)
-            print(input("Presiona Enter para intentar reconectar..."))
-            esp32 = setupsincro()
-            esp_conectada = 1
-            client.publish(mqtt_topics["estados"]["conexion_esp"], 1)
-            t_inicial = time.time()  
-            i = 0 
-            ultimo_paquete_valido = time.time()  
+        # Si la ESP se desconecta, el loop vuelve arriba y el bloque de reconexión lo maneja
 
 
             
