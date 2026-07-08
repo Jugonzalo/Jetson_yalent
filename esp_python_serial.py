@@ -29,7 +29,7 @@ elif modo_seleccionado.lower() == '2':
 else:
     modo_seleccionado = "coordenadas"
 
-baudios = 38400
+baudios = 115200
 MAX_REINTENTOS_SYNC = 10   # Maximo de intentos para sincronizar con la ESP32 al inicio
 HEADER_BYTE = 0xAA         # Byte de inicio del paquete, debe coincidir con el de la ESP32
 TIMEOUT_ESP = 3   # segundos
