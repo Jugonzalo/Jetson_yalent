@@ -41,6 +41,7 @@ mqtt_topics = {
         "v_total_ref": "robot/comandos/v_total_ref",
         "x_ref": "robot/comandos/x_ref",
         "y_ref": "robot/comandos/y_ref",
+        "nodo_des": "robot/comandos/nodo_des"
     },
 }
 # se usa: mqtt_topics["telemetria"]["v_der"], mqtt_topics["estados"]["conexion_esp"], mqtt_topics["comandos"]["duty_der"]
