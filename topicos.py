@@ -6,6 +6,8 @@ mqtt_topics = {
         "d_pared_cam": "robot/camara/d_pared_cam",
         "nodo_actual": "robot/camara/nodo_actual",
         "siguiente_nodo": "robot/camara/siguiente_nodo",
+        "estructura": "robot/camara/estructura",
+        "nodo_bloq": "robot/camara/nodo_bloq",
     },
     "telemetria": {
         "v_der": "robot/telemetria/v_der",
