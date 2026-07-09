@@ -22,7 +22,7 @@ class SistemaNavegacionHeadlessTorch:
         self.UMBRAL_TOLERANCIA = 2.0  # Umbral unico de 2 cm para todos los nodos
 
         # Nodos especiales para activar el flag de sensorizacion
-        self.NODOS_FLAG_SEN = {"01", "10", "20", "31", "22", "14", "33", "53", "52", "51", "40"}
+        self.NODOS_FLAG_SEN = {"01", "10", "20", "31", "22", "14", "33", "53", "52", "51", "41"}
 
         # Telemetria: se actualiza dinamicamente via MQTT callbacks
         self.robot_x = 0.0
