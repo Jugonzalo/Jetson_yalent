@@ -18,10 +18,10 @@ class SistemaNavegacionHeadlessTorch:
         # CONFIGURACION Y CONSTANTES DEL LABERINTO
         # --------------------------------------------------
         self.CELL_SIZE = 30  # cm por celda
-        self.nodo_destino = None  # Se inicializa vacío, llegará vía MQTT
+        self.nodo_destino = None  # Se inicializa vacio, llegara via MQTT
         self.UMBRAL_TOLERANCIA = 2.0  # Umbral unico de 2 cm para todos los nodos
 
-        # Nodos especiales para activar el flag de sensorización
+        # Nodos especiales para activar el flag de sensorizacion
         self.NODOS_FLAG_SEN = {"01", "10", "20", "31", "22", "14", "33", "53", "52", "51", "41"}
 
         # Telemetria: se actualiza dinamicamente via MQTT callbacks
@@ -87,7 +87,7 @@ class SistemaNavegacionHeadlessTorch:
         client.subscribe(mqtt_topics["telemetria"]["x"])
         client.subscribe(mqtt_topics["telemetria"]["y"])
         client.subscribe(mqtt_topics["telemetria"]["teta"])
-        # Suscripción al nuevo tópico de nodo destino dinámico
+        # Suscripcion al nuevo topico de nodo destino dinamico
         client.subscribe("robot/comandos/nodo_des")
 
     def _on_message(self, client, userdata, msg):
@@ -146,19 +146,18 @@ class SistemaNavegacionHeadlessTorch:
         self.nodo_actual_fijo = self.calcular_nodo_actual_hibrido(self.robot_x, self.robot_y)
         self.construir_grafo_base()
 
-        # --- LÓGICA DE CONTROL PARA EL FLAG EN NODOS ESPECÍFICOS ---
+        # LOGICA DE CONTROL PARA EL FLAG EN NODOS ESPECIFICOS
         topico_flag_sen = mqtt_topics["estados"].get("flag_sen", "robot/estados/flag_sen")
         if self.nodo_actual_fijo in self.NODOS_FLAG_SEN:
             self.client.publish(topico_flag_sen, "1")
         else:
             self.client.publish(topico_flag_sen, "0")
-        # -----------------------------------------------------------
 
         self.client.publish(mqtt_topics["camara"]["nodo_actual"], str(self.nodo_actual_fijo))
 
-        # Si aún no se recibe un nodo destino por MQTT, pausamos el ruteo
+        # Si aun no se recibe un nodo destino por MQTT, pausamos el ruteo
         if not self.nodo_destino:
-            print("[A*] Esperando asignación de nodo_destino vía MQTT...")
+            print("[A*] Esperando asignacion de nodo_destino via MQTT...")
             return
 
         x_meta, y_meta = self.positions[self.nodo_destino]
@@ -236,7 +235,7 @@ if __name__ == "__main__":
     tiempo_espera_input = input("Tiempo de espera ante un obstaculo en segundos (Default 10.0): ").strip()
     tiempo_espera_obstaculo = float(tiempo_espera_input) if tiempo_espera_input else 10.0
 
-    # Inicializamos sin nodo_destino (se obtendrá dinámicamente)
+    # Inicializamos sin nodo_destino (se obtendra dinamicamente)
     navegador = SistemaNavegacionHeadlessTorch(
         tiempo_espera_obstaculo=tiempo_espera_obstaculo,
         broker_address="localhost" 
