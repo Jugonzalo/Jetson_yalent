@@ -22,7 +22,7 @@ class SistemaNavegacionHeadlessTorch:
         self.UMBRAL_TOLERANCIA = 2.0  # Umbral unico de 2 cm para todos los nodos
 
         # Nodos especiales para activar el flag de sensorizacion
-        self.NODOS_FLAG_SEN = {"01", "10", "20", "31", "22", "14", "33", "53", "52", "51", "41"}
+        self.NODOS_FLAG_SEN = {"01", "10", "20", "31", "22", "14", "33", "53", "52", "51", "40"}
 
         # Telemetria: se actualiza dinamicamente via MQTT callbacks
         self.robot_x = 0.0
@@ -192,6 +192,7 @@ class SistemaNavegacionHeadlessTorch:
 
         topico_nodo_obs = mqtt_topics["camara"].get("nodo_obs", "robot/camara/nodo_obs")
         topico_dist_obs = mqtt_topics["camara"].get("dist_obs", "robot/camara/dist_obs")
+        topico_nodo_bloq = mqtt_topics["camara"].get("nodo_bloq", "robot/camara/nodo_bloq")
 
         if objeto_detectado and nodo_objeto:
             self.client.publish(topico_nodo_obs, str(nodo_objeto))
@@ -202,6 +203,7 @@ class SistemaNavegacionHeadlessTorch:
                 self.nodo_en_espera = nodo_objeto
                 self.timestamp_inicio_espera = ahora
                 self.client.publish(mqtt_topics["estados"]["flag_obs"], "0")
+                self.client.publish(topico_nodo_bloq, "ninguno")
                 print(f"[OBSTACULO] Objeto ({clase_nombre}) en nodo {nodo_objeto}. Esperando {self.tiempo_espera_obstaculo}s...")
                 return None
 
@@ -210,15 +212,18 @@ class SistemaNavegacionHeadlessTorch:
                 if transcurrido >= self.tiempo_espera_obstaculo:
                     self.estado_obstaculo = "BLOQUEADO_CONFIRMADO"
                     self.client.publish(mqtt_topics["estados"]["flag_obs"], "1")
+                    self.client.publish(topico_nodo_bloq, str(nodo_objeto))
                     return nodo_objeto
                 else:
                     self.client.publish(mqtt_topics["estados"]["flag_obs"], "0")
+                    self.client.publish(topico_nodo_bloq, "ninguno")
                     return None
             else:
                 self.estado_obstaculo = "ESPERANDO"
                 self.nodo_en_espera = nodo_objeto
                 self.timestamp_inicio_espera = ahora
                 self.client.publish(mqtt_topics["estados"]["flag_obs"], "0")
+                self.client.publish(topico_nodo_bloq, "ninguno")
                 return None
         else:
             self.estado_obstaculo = "LIBRE"
@@ -227,6 +232,7 @@ class SistemaNavegacionHeadlessTorch:
             self.client.publish(mqtt_topics["estados"]["flag_obs"], "0")
             self.client.publish(topico_nodo_obs, "ninguno")
             self.client.publish(topico_dist_obs, "-1")
+            self.client.publish(topico_nodo_bloq, "ninguno")
             return None
 
 
