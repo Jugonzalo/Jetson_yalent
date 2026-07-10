@@ -142,6 +142,28 @@ class SistemaNavegacionHeadlessTorch:
                 return nodo
         return self.nodo_actual_fijo if self.nodo_actual_fijo else self.nodo_mas_cercano(x_robot, y_robot)
 
+    def obtener_siguiente_hito(self, ruta):
+        """Colapsa los tramos rectos de la ruta A* en un solo hito: si varios
+        nodos seguidos quedan en la misma direccion, se salta directo al
+        ultimo antes del giro (o al destino, si toda la ruta restante es
+        recta), en vez de mandar el vecino inmediato nodo por nodo."""
+        if len(ruta) <= 1:
+            return self.nodo_actual_fijo
+
+        x0, y0 = self.positions[ruta[0]]
+        x1, y1 = self.positions[ruta[1]]
+        direccion = (x1 - x0, y1 - y0)
+
+        hito = ruta[1]
+        for i in range(1, len(ruta) - 1):
+            xa, ya = self.positions[ruta[i]]
+            xb, yb = self.positions[ruta[i + 1]]
+            if (xb - xa, yb - ya) != direccion:
+                break
+            hito = ruta[i + 1]
+
+        return hito
+
     def ejecutar_ruteo(self, nodo_bloqueado=None):
         self.nodo_actual_fijo = self.calcular_nodo_actual_hibrido(self.robot_x, self.robot_y)
         self.construir_grafo_base()
@@ -176,7 +198,7 @@ class SistemaNavegacionHeadlessTorch:
 
         try:
             ruta = nx.astar_path(self.G, self.nodo_actual_fijo, self.nodo_destino, heuristic=self.heuristic)
-            nodo_siguiente = ruta[1] if len(ruta) > 1 else self.nodo_actual_fijo
+            nodo_siguiente = self.obtener_siguiente_hito(ruta)
             x_ref, y_ref = self.positions[nodo_siguiente]
 
             self.client.publish(mqtt_topics["comandos"]["x_ref"], str(x_ref))
