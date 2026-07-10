@@ -85,8 +85,10 @@ class SistemaNavegacionHeadlessTorch:
         client.subscribe(mqtt_topics["telemetria"]["y"])
         client.subscribe(mqtt_topics["telemetria"]["teta"])
         client.subscribe(mqtt_topics["comandos"]["nodo_des"])
-        client.subscribe(mqtt_topics["comandos"]["grafo"])
-        client.subscribe(mqtt_topics["comandos"]["pose_inicial"])
+        # Plano de control (edicion de laberinto y pose inicial): qos 1 para que un
+        # comando no se pierda. Con qos 0 la web quedaria desincronizada del backend.
+        client.subscribe(mqtt_topics["comandos"]["grafo"], qos=1)
+        client.subscribe(mqtt_topics["comandos"]["pose_inicial"], qos=1)
 
         # Publicar la estructura del grafo (retenido) para que la web dibuje el
         # laberinto desde una unica fuente de verdad. Se reenvia en cada reconexion.
@@ -106,7 +108,7 @@ class SistemaNavegacionHeadlessTorch:
             "positions": {k: list(v) for k, v in self.positions.items()},
         }
         self.client.publish(
-            mqtt_topics["planificador"]["grafo"], json.dumps(payload_grafo), retain=True
+            mqtt_topics["planificador"]["grafo"], json.dumps(payload_grafo), retain=True, qos=1
         )
         print("[MQTT] Grafo del laberinto publicado (retenido).")
 
@@ -157,7 +159,7 @@ class SistemaNavegacionHeadlessTorch:
             "timestamp": time.time(),
         }
         self.client.publish(
-            mqtt_topics["planificador"]["pose_inicial"], json.dumps(payload), retain=True
+            mqtt_topics["planificador"]["pose_inicial"], json.dumps(payload), retain=True, qos=1
         )
 
     def aplicar_pose_inicial(self, payload_crudo):
@@ -290,6 +292,7 @@ class SistemaNavegacionHeadlessTorch:
         self.client.publish(
             mqtt_topics["planificador"]["edicion"],
             json.dumps({"ok": ok, "mensaje": mensaje, "timestamp": time.time()}),
+            qos=1,
         )
 
     def _on_message(self, client, userdata, msg):
@@ -392,7 +395,7 @@ class SistemaNavegacionHeadlessTorch:
         clave = json.dumps({k: v for k, v in ruta_payload.items() if k != "timestamp"})
         if clave != getattr(self, "_ultima_ruta_json", None):
             self.client.publish(
-                mqtt_topics["planificador"]["ruta"], json.dumps(ruta_payload), retain=True
+                mqtt_topics["planificador"]["ruta"], json.dumps(ruta_payload), retain=True, qos=1
             )
             self._ultima_ruta_json = clave
 
