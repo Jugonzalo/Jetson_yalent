@@ -8,6 +8,14 @@ mqtt_topics = {
         "siguiente_nodo": "robot/camara/siguiente_nodo",
         "estructura": "robot/camara/estructura",
         "nodo_bloq": "robot/camara/nodo_bloq",
+        "nodo_obs": "robot/camara/nodo_obs",
+        "dist_obs": "robot/camara/dist_obs",
+    },
+    "planificador": {
+        "grafo": "robot/planificador/grafo",
+        "ruta": "robot/planificador/ruta",
+        "edicion": "robot/planificador/edicion",
+        "pose_inicial": "robot/planificador/pose_inicial",
     },
     "telemetria": {
         "v_der": "robot/telemetria/v_der",
@@ -29,6 +37,7 @@ mqtt_topics = {
         "modo_control": "robot/estados/modo_control",
         "flag_pos": "robot/estados/flag_pos",
         "flag_obs": "robot/estados/flag_obs",
+        "flag_obstaculo": "robot/estados/flag_obstaculo",
         "flag_sen": "robot/estados/flag_sen",
         "ejecutando": "robot/estados/ejecutando",
         "grabar": "robot/estados/grabar",
@@ -44,6 +53,9 @@ mqtt_topics = {
         "x_ref": "robot/comandos/x_ref",
         "y_ref": "robot/comandos/y_ref",
         "nodo_des": "robot/comandos/nodo_des",
+        "reset_0": "robot/comandos/reset_0",
+        "grafo": "robot/comandos/grafo",
+        "pose_inicial": "robot/comandos/pose_inicial",
     },
 }
 # se usa: mqtt_topics["telemetria"]["v_der"], mqtt_topics["estados"]["conexion_esp"], mqtt_topics["comandos"]["duty_der"]

@@ -2,9 +2,11 @@ import os
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import cv2
 import math
+import json
 import numpy as np
 import networkx as nx
 import time
+import threading
 import torch
 import paho.mqtt.client as mqtt
 
@@ -17,10 +19,21 @@ class SistemaNavegacionHeadlessTorch:
         self.nodo_destino = str(nodo_destino).strip()
         self.UMBRAL_TOLERANCIA = 2.0  
 
+        # Pose cruda que reporta la ESP32, en SU propio marco: tras un reset_0 su
+        # origen es donde este el robot y su eje X apunta hacia donde mira.
         self.robot_x = 0.0
         self.robot_y = 0.0
         self.robot_theta = 0.0
         self.nodo_actual_fijo = None
+
+        # Pose inicial declarada desde la web: origen del marco de la ESP dentro
+        # del laberinto. Identidad por defecto (nodo "00" mirando al Este), asi
+        # que sin configurar nada el comportamiento es el de siempre.
+        self.ORIENTACIONES_VALIDAS = (0, 90, 180, 270)
+        self.nodo_inicial = "00"
+        self.theta_inicial = 0        # grados, 0 = +X (Este), creciente antihorario
+        self.pose_x0 = 0.0
+        self.pose_y0 = 0.0
 
         self.CAM_HEIGHT_CM = 15.0
         self.CAM_PITCH_RAD = math.radians(20.0)
@@ -71,9 +84,236 @@ class SistemaNavegacionHeadlessTorch:
         client.subscribe(mqtt_topics["telemetria"]["x"])
         client.subscribe(mqtt_topics["telemetria"]["y"])
         client.subscribe(mqtt_topics["telemetria"]["teta"])
+        client.subscribe(mqtt_topics["comandos"]["nodo_des"])
+        client.subscribe(mqtt_topics["comandos"]["grafo"])
+        client.subscribe(mqtt_topics["comandos"]["pose_inicial"])
+
+        # Publicar la estructura del grafo (retenido) para que la web dibuje el
+        # laberinto desde una unica fuente de verdad. Se reenvia en cada reconexion.
+        # Esto ademas pisa el retained de una sesion anterior: como las ediciones
+        # del laberinto viven solo en memoria, al reiniciar el proceso la web debe
+        # ver el grafo base y no el editado de la corrida pasada.
+        self.publicar_grafo()
+        # Igual que el grafo, la pose inicial vive solo en memoria: al arrancar
+        # pisamos el retenido de la sesion anterior con la pose realmente vigente.
+        self.publicar_pose_inicial(True, "Pose inicial por defecto")
+
+    def publicar_grafo(self):
+        payload_grafo = {
+            "cell_size": self.CELL_SIZE,
+            "nodes": list(self.positions.keys()),
+            "graph_connections": self.graph_connections,
+            "positions": {k: list(v) for k, v in self.positions.items()},
+        }
+        self.client.publish(
+            mqtt_topics["planificador"]["grafo"], json.dumps(payload_grafo), retain=True
+        )
+        print("[MQTT] Grafo del laberinto publicado (retenido).")
+
+    # ------------------------------------------------------------------
+    # POSE INICIAL: conversion entre el marco de la ESP32 y el del laberinto
+    # ------------------------------------------------------------------
+    # La ESP arranca su odometria en (0,0,0) y no acepta una pose inicial: su
+    # paquete serial tiene formato fijo. Por eso el laberinto y la ESP viven en
+    # marcos distintos y la conversion se hace aca.
+    #
+    #   global = R(theta_inicial) * esp + (pose_x0, pose_y0)
+    #
+    def esp_a_global(self, x_esp, y_esp):
+        rad = math.radians(self.theta_inicial)
+        cos_t, sin_t = math.cos(rad), math.sin(rad)
+        return (
+            self.pose_x0 + x_esp * cos_t - y_esp * sin_t,
+            self.pose_y0 + x_esp * sin_t + y_esp * cos_t,
+        )
+
+    def global_a_esp(self, x_glob, y_glob):
+        """Inversa de esp_a_global. Necesaria porque x_ref/y_ref viajan a la ESP,
+        que solo entiende su propio marco."""
+        rad = math.radians(self.theta_inicial)
+        cos_t, sin_t = math.cos(rad), math.sin(rad)
+        dx, dy = x_glob - self.pose_x0, y_glob - self.pose_y0
+        return (dx * cos_t + dy * sin_t, -dx * sin_t + dy * cos_t)
+
+    @property
+    def pose_global(self):
+        return self.esp_a_global(self.robot_x, self.robot_y)
+
+    @property
+    def theta_global(self):
+        """Rumbo del robot en el laberinto, en grados antihorarios desde el Este.
+        La ESP reporta theta en sentido horario (de ahi el signo negativo, que ya
+        estaba en el calculo de obstaculos)."""
+        return self.theta_inicial - self.robot_theta
+
+    def publicar_pose_inicial(self, ok=True, mensaje=""):
+        payload = {
+            "nodo": self.nodo_inicial,
+            "theta": self.theta_inicial,
+            "x0": self.pose_x0,
+            "y0": self.pose_y0,
+            "ok": ok,
+            "mensaje": mensaje,
+            "timestamp": time.time(),
+        }
+        self.client.publish(
+            mqtt_topics["planificador"]["pose_inicial"], json.dumps(payload), retain=True
+        )
+
+    def aplicar_pose_inicial(self, payload_crudo):
+        """Fija donde arranca el robot dentro del laberinto (nodo + orientacion).
+
+        Pone a cero la odometria de la ESP y toma ese instante como origen del
+        marco, de modo que ambos marcos coincidan exactamente en el momento cero.
+        """
+        try:
+            payload = json.loads(payload_crudo)
+        except json.JSONDecodeError as e:
+            self.publicar_pose_inicial(False, f"JSON invalido: {e}")
+            return
+
+        if not isinstance(payload, dict):
+            self.publicar_pose_inicial(False, "El payload debe ser un objeto")
+            return
+
+        nodo = str(payload.get("nodo", "")).strip()
+        if nodo not in self.positions:
+            self.publicar_pose_inicial(False, f"Nodo inicial invalido: '{nodo}'")
+            return
+
+        try:
+            theta = int(payload["theta"]) % 360
+        except (KeyError, TypeError, ValueError):
+            self.publicar_pose_inicial(False, "Falta 'theta' o no es un numero")
+            return
+
+        if theta not in self.ORIENTACIONES_VALIDAS:
+            self.publicar_pose_inicial(False, f"Orientacion invalida: {theta} (usa 0, 90, 180 o 270)")
+            return
+
+        self.nodo_inicial = nodo
+        self.theta_inicial = theta
+        self.pose_x0, self.pose_y0 = (float(v) for v in self.positions[nodo])
+
+        # La ESP debe reiniciar su odometria: su (0,0,0) pasa a ser esta pose.
+        # Anticipamos la lectura a cero para que ningun ciclo de A* use la pose
+        # vieja con el offset nuevo (saltaria a un nodo equivocado por un instante).
+        self.robot_x = 0.0
+        self.robot_y = 0.0
+        self.robot_theta = 0.0
+        self.nodo_actual_fijo = nodo
+
+        self.client.publish(mqtt_topics["comandos"]["reset_0"], "1")
+        # El flag viaja a la ESP en cada ciclo del enlace serial; hay que bajarlo
+        # despues, y sin bloquear el hilo de red de paho.
+        threading.Timer(0.5, lambda: self.client.publish(mqtt_topics["comandos"]["reset_0"], "0")).start()
+
+        self._ultima_ruta_json = None   # forzar republicacion de la ruta
+        print(f"[POSE] Pose inicial fijada: nodo {nodo}, theta {theta} grados.")
+        self.publicar_pose_inicial(True, f"Pose inicial: nodo {nodo}, {theta} grados")
+
+    def son_adyacentes(self, a, b):
+        """Dos nodos son conectables solo si son celdas contiguas de la grilla.
+        El robot no puede saltar de 00 a 44: se mueve entre celdas vecinas."""
+        (xa, ya), (xb, yb) = self.positions[a], self.positions[b]
+        return abs(xa - xb) + abs(ya - yb) == self.CELL_SIZE
+
+    def validar_grafo(self, propuesto):
+        """Valida y normaliza un grafo recibido desde la web.
+
+        Devuelve (grafo_normalizado, None) o (None, motivo_del_rechazo). Toda
+        arista se normaliza a bidireccional, igual que hace construir_grafo_base:
+        una conexion declarada en un solo sentido no existiria para A*.
+        """
+        if not isinstance(propuesto, dict):
+            return None, "El grafo debe ser un objeto"
+
+        normalizado = {nodo: set() for nodo in self.positions}
+
+        for nodo, vecinos in propuesto.items():
+            if nodo not in self.positions:
+                return None, f"Nodo desconocido: '{nodo}'"
+            if not isinstance(vecinos, list):
+                return None, f"Los vecinos de '{nodo}' deben ser una lista"
+
+            for vecino in vecinos:
+                if vecino not in self.positions:
+                    return None, f"Vecino desconocido: '{vecino}'"
+                if vecino == nodo:
+                    return None, f"Arista invalida: '{nodo}' consigo mismo"
+                if not self.son_adyacentes(nodo, vecino):
+                    return None, f"Nodos no contiguos: '{nodo}'-'{vecino}'"
+                normalizado[nodo].add(vecino)
+                normalizado[vecino].add(nodo)
+
+        return {n: sorted(v) for n, v in normalizado.items()}, None
+
+    def aplicar_grafo_editado(self, payload_crudo):
+        """Aplica un laberinto editado desde la web (robot/comandos/grafo).
+
+        Solo vive en memoria: al reiniciar el proceso se vuelve al grafo base.
+        No hace falta tocar self.G aqui, porque ejecutar_ruteo() llama a
+        construir_grafo_base() en cada ciclo y reconstruye desde graph_connections.
+        """
+        try:
+            payload = json.loads(payload_crudo)
+        except json.JSONDecodeError as e:
+            self.publicar_ack_edicion(False, f"JSON invalido: {e}")
+            return
+
+        propuesto = payload.get("graph_connections") if isinstance(payload, dict) else None
+        if propuesto is None:
+            self.publicar_ack_edicion(False, "Falta la clave 'graph_connections'")
+            return
+
+        normalizado, motivo = self.validar_grafo(propuesto)
+        if motivo:
+            print(f"[EDICION] Grafo rechazado: {motivo}")
+            self.publicar_ack_edicion(False, motivo)
+            # Reemitimos el grafo vigente para que la web revierta su borrador.
+            self.publicar_grafo()
+            return
+
+        # Swap de la referencia completa en vez de mutar el dict en sitio: este
+        # callback corre en el hilo de red de paho mientras el bucle principal
+        # lee graph_connections, y asi nunca observa un grafo a medio escribir.
+        self.graph_connections = normalizado
+        aristas = sum(len(v) for v in normalizado.values()) // 2
+        print(f"[EDICION] Laberinto actualizado: {aristas} aristas.")
+
+        # Forzar la republicacion de la ruta aunque el A* devuelva lo mismo.
+        self._ultima_ruta_json = None
+        self.publicar_grafo()
+        self.publicar_ack_edicion(True, f"Laberinto actualizado ({aristas} aristas)")
+
+    def publicar_ack_edicion(self, ok, mensaje):
+        self.client.publish(
+            mqtt_topics["planificador"]["edicion"],
+            json.dumps({"ok": ok, "mensaje": mensaje, "timestamp": time.time()}),
+        )
 
     def _on_message(self, client, userdata, msg):
         try:
+            # Laberinto editado desde la web (payload JSON)
+            if msg.topic == mqtt_topics["comandos"]["grafo"]:
+                self.aplicar_grafo_editado(msg.payload.decode())
+                return
+
+            # Pose inicial fijada desde la web (payload JSON)
+            if msg.topic == mqtt_topics["comandos"]["pose_inicial"]:
+                self.aplicar_pose_inicial(msg.payload.decode())
+                return
+
+            # Cambio de nodo destino en caliente (payload de texto, no numerico)
+            if msg.topic == mqtt_topics["comandos"]["nodo_des"]:
+                nuevo = msg.payload.decode().strip()
+                if nuevo in self.positions:
+                    self.nodo_destino = nuevo
+                    print(f"[MQTT] Nuevo nodo destino recibido: {nuevo}")
+                else:
+                    print(f"[MQTT ERROR] Nodo destino invalido: '{nuevo}'")
+                return
+
             payload = float(msg.payload.decode().strip())
             if msg.topic == mqtt_topics["telemetria"]["x"]:
                 self.robot_x = payload
@@ -114,17 +354,46 @@ class SistemaNavegacionHeadlessTorch:
                 return nodo
         return self.nodo_actual_fijo if self.nodo_actual_fijo else self.nodo_mas_cercano(x_robot, y_robot)
 
+    def publicar_ruta(self, nodo_siguiente, ruta_completa, nodo_bloqueado, x_ref, y_ref):
+        """Publica la ruta A* completa como JSON, solo cuando cambia (evita saturar el bucle ~10 Hz)."""
+        ruta_payload = {
+            "nodo_actual": self.nodo_actual_fijo,
+            "nodo_siguiente": nodo_siguiente,
+            "nodo_destino": self.nodo_destino,
+            "ruta_completa": ruta_completa,
+            "nodo_bloqueado": nodo_bloqueado,
+            "x_ref": int(x_ref),
+            "y_ref": int(y_ref),
+            "timestamp": time.time(),
+        }
+        # El timestamp cambia siempre; comparamos ignorandolo para deduplicar de verdad.
+        clave = json.dumps({k: v for k, v in ruta_payload.items() if k != "timestamp"})
+        if clave != getattr(self, "_ultima_ruta_json", None):
+            self.client.publish(
+                mqtt_topics["planificador"]["ruta"], json.dumps(ruta_payload), retain=True
+            )
+            self._ultima_ruta_json = clave
+
+    def publicar_referencia(self, x_glob, y_glob):
+        """Traduce una meta del laberinto al marco de la ESP antes de mandarsela."""
+        x_esp, y_esp = self.global_a_esp(x_glob, y_glob)
+        self.client.publish(mqtt_topics["comandos"]["x_ref"], str(round(x_esp, 2)))
+        self.client.publish(mqtt_topics["comandos"]["y_ref"], str(round(y_esp, 2)))
+
     def ejecutar_ruteo(self, nodo_bloqueado=None):
-        self.nodo_actual_fijo = self.calcular_nodo_actual_hibrido(self.robot_x, self.robot_y)
+        # Toda la logica de A* razona en coordenadas del laberinto, no de la ESP.
+        robot_x_glob, robot_y_glob = self.pose_global
+        self.nodo_actual_fijo = self.calcular_nodo_actual_hibrido(robot_x_glob, robot_y_glob)
         self.construir_grafo_base()
 
         self.client.publish(mqtt_topics["camara"]["nodo_actual"], str(self.nodo_actual_fijo))
 
         x_meta, y_meta = self.positions[self.nodo_destino]
-        if (abs(self.robot_x - x_meta) <= self.UMBRAL_TOLERANCIA) and (abs(self.robot_y - y_meta) <= self.UMBRAL_TOLERANCIA):
+        if (abs(robot_x_glob - x_meta) <= self.UMBRAL_TOLERANCIA) and (abs(robot_y_glob - y_meta) <= self.UMBRAL_TOLERANCIA):
             print("[A*] Meta del laberinto alcanzada con exito!")
             self.client.publish(mqtt_topics["estados"]["flag_pos"], "1")
             self.client.publish(mqtt_topics["camara"]["siguiente_nodo"], str(self.nodo_destino))
+            self.publicar_ruta(self.nodo_destino, [self.nodo_actual_fijo], nodo_bloqueado, x_meta, y_meta)
             return
         else:
             self.client.publish(mqtt_topics["estados"]["flag_pos"], "0")
@@ -139,11 +408,13 @@ class SistemaNavegacionHeadlessTorch:
             nodo_siguiente = ruta[1] if len(ruta) > 1 else self.nodo_actual_fijo
             x_ref, y_ref = self.positions[nodo_siguiente]
 
-            self.client.publish(mqtt_topics["comandos"]["x_ref"], str(x_ref))
-            self.client.publish(mqtt_topics["comandos"]["y_ref"], str(y_ref))
+            self.publicar_referencia(x_ref, y_ref)
             self.client.publish(mqtt_topics["camara"]["siguiente_nodo"], str(nodo_siguiente))
+            self.publicar_ruta(nodo_siguiente, ruta, nodo_bloqueado, x_ref, y_ref)
         except nx.NetworkXNoPath:
             print(f"[AVISO CRITICO] No existe ruta viable a {self.nodo_destino}.")
+            x_act, y_act = self.positions[self.nodo_actual_fijo]
+            self.publicar_ruta(self.nodo_actual_fijo, [], nodo_bloqueado, x_act, y_act)
 
 
 if __name__ == "__main__":
@@ -240,12 +511,14 @@ if __name__ == "__main__":
                         centro_x = (x1 + x2) / 2.0
                         beta_desviacion_rad = math.atan2((centro_x - navegador.PRINCIPAL_POINT_X), navegador.FOCAL_LENGTH_PX)
                         
-                        # Correccion de signo para sentido horario (tipico de brujulas/odometrias)
-                        angulo_robot_rad = math.radians(-navegador.robot_theta)
+                        # theta_global ya incorpora la orientacion inicial declarada y
+                        # la correccion de signo (la ESP reporta theta en horario).
+                        angulo_robot_rad = math.radians(navegador.theta_global)
                         angulo_total_obstaculo_rad = angulo_robot_rad - beta_desviacion_rad
 
-                        obs_global_x = navegador.robot_x + distancia_horizontal_cm * math.cos(angulo_total_obstaculo_rad)
-                        obs_global_y = navegador.robot_y + distancia_horizontal_cm * math.sin(angulo_total_obstaculo_rad)
+                        robot_x_glob, robot_y_glob = navegador.pose_global
+                        obs_global_x = robot_x_glob + distancia_horizontal_cm * math.cos(angulo_total_obstaculo_rad)
+                        obs_global_y = robot_y_glob + distancia_horizontal_cm * math.sin(angulo_total_obstaculo_rad)
 
                         nodo_afectado = navegador.nodo_mas_cercano(obs_global_x, obs_global_y)
                         
