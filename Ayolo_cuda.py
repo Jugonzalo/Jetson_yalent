@@ -2,6 +2,7 @@ import os
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import cv2
 import math
+import json
 import numpy as np
 import networkx as nx
 import time
@@ -71,9 +72,125 @@ class SistemaNavegacionHeadlessTorch:
         client.subscribe(mqtt_topics["telemetria"]["x"])
         client.subscribe(mqtt_topics["telemetria"]["y"])
         client.subscribe(mqtt_topics["telemetria"]["teta"])
+        client.subscribe(mqtt_topics["comandos"]["nodo_des"])
+        client.subscribe(mqtt_topics["comandos"]["grafo"])
+
+        # Publicar la estructura del grafo (retenido) para que la web dibuje el
+        # laberinto desde una unica fuente de verdad. Se reenvia en cada reconexion.
+        # Esto ademas pisa el retained de una sesion anterior: como las ediciones
+        # del laberinto viven solo en memoria, al reiniciar el proceso la web debe
+        # ver el grafo base y no el editado de la corrida pasada.
+        self.publicar_grafo()
+
+    def publicar_grafo(self):
+        payload_grafo = {
+            "cell_size": self.CELL_SIZE,
+            "nodes": list(self.positions.keys()),
+            "graph_connections": self.graph_connections,
+            "positions": {k: list(v) for k, v in self.positions.items()},
+        }
+        self.client.publish(
+            mqtt_topics["planificador"]["grafo"], json.dumps(payload_grafo), retain=True
+        )
+        print("[MQTT] Grafo del laberinto publicado (retenido).")
+
+    def son_adyacentes(self, a, b):
+        """Dos nodos son conectables solo si son celdas contiguas de la grilla.
+        El robot no puede saltar de 00 a 44: se mueve entre celdas vecinas."""
+        (xa, ya), (xb, yb) = self.positions[a], self.positions[b]
+        return abs(xa - xb) + abs(ya - yb) == self.CELL_SIZE
+
+    def validar_grafo(self, propuesto):
+        """Valida y normaliza un grafo recibido desde la web.
+
+        Devuelve (grafo_normalizado, None) o (None, motivo_del_rechazo). Toda
+        arista se normaliza a bidireccional, igual que hace construir_grafo_base:
+        una conexion declarada en un solo sentido no existiria para A*.
+        """
+        if not isinstance(propuesto, dict):
+            return None, "El grafo debe ser un objeto"
+
+        normalizado = {nodo: set() for nodo in self.positions}
+
+        for nodo, vecinos in propuesto.items():
+            if nodo not in self.positions:
+                return None, f"Nodo desconocido: '{nodo}'"
+            if not isinstance(vecinos, list):
+                return None, f"Los vecinos de '{nodo}' deben ser una lista"
+
+            for vecino in vecinos:
+                if vecino not in self.positions:
+                    return None, f"Vecino desconocido: '{vecino}'"
+                if vecino == nodo:
+                    return None, f"Arista invalida: '{nodo}' consigo mismo"
+                if not self.son_adyacentes(nodo, vecino):
+                    return None, f"Nodos no contiguos: '{nodo}'-'{vecino}'"
+                normalizado[nodo].add(vecino)
+                normalizado[vecino].add(nodo)
+
+        return {n: sorted(v) for n, v in normalizado.items()}, None
+
+    def aplicar_grafo_editado(self, payload_crudo):
+        """Aplica un laberinto editado desde la web (robot/comandos/grafo).
+
+        Solo vive en memoria: al reiniciar el proceso se vuelve al grafo base.
+        No hace falta tocar self.G aqui, porque ejecutar_ruteo() llama a
+        construir_grafo_base() en cada ciclo y reconstruye desde graph_connections.
+        """
+        try:
+            payload = json.loads(payload_crudo)
+        except json.JSONDecodeError as e:
+            self.publicar_ack_edicion(False, f"JSON invalido: {e}")
+            return
+
+        propuesto = payload.get("graph_connections") if isinstance(payload, dict) else None
+        if propuesto is None:
+            self.publicar_ack_edicion(False, "Falta la clave 'graph_connections'")
+            return
+
+        normalizado, motivo = self.validar_grafo(propuesto)
+        if motivo:
+            print(f"[EDICION] Grafo rechazado: {motivo}")
+            self.publicar_ack_edicion(False, motivo)
+            # Reemitimos el grafo vigente para que la web revierta su borrador.
+            self.publicar_grafo()
+            return
+
+        # Swap de la referencia completa en vez de mutar el dict en sitio: este
+        # callback corre en el hilo de red de paho mientras el bucle principal
+        # lee graph_connections, y asi nunca observa un grafo a medio escribir.
+        self.graph_connections = normalizado
+        aristas = sum(len(v) for v in normalizado.values()) // 2
+        print(f"[EDICION] Laberinto actualizado: {aristas} aristas.")
+
+        # Forzar la republicacion de la ruta aunque el A* devuelva lo mismo.
+        self._ultima_ruta_json = None
+        self.publicar_grafo()
+        self.publicar_ack_edicion(True, f"Laberinto actualizado ({aristas} aristas)")
+
+    def publicar_ack_edicion(self, ok, mensaje):
+        self.client.publish(
+            mqtt_topics["planificador"]["edicion"],
+            json.dumps({"ok": ok, "mensaje": mensaje, "timestamp": time.time()}),
+        )
 
     def _on_message(self, client, userdata, msg):
         try:
+            # Laberinto editado desde la web (payload JSON)
+            if msg.topic == mqtt_topics["comandos"]["grafo"]:
+                self.aplicar_grafo_editado(msg.payload.decode())
+                return
+
+            # Cambio de nodo destino en caliente (payload de texto, no numerico)
+            if msg.topic == mqtt_topics["comandos"]["nodo_des"]:
+                nuevo = msg.payload.decode().strip()
+                if nuevo in self.positions:
+                    self.nodo_destino = nuevo
+                    print(f"[MQTT] Nuevo nodo destino recibido: {nuevo}")
+                else:
+                    print(f"[MQTT ERROR] Nodo destino invalido: '{nuevo}'")
+                return
+
             payload = float(msg.payload.decode().strip())
             if msg.topic == mqtt_topics["telemetria"]["x"]:
                 self.robot_x = payload
@@ -114,6 +231,26 @@ class SistemaNavegacionHeadlessTorch:
                 return nodo
         return self.nodo_actual_fijo if self.nodo_actual_fijo else self.nodo_mas_cercano(x_robot, y_robot)
 
+    def publicar_ruta(self, nodo_siguiente, ruta_completa, nodo_bloqueado, x_ref, y_ref):
+        """Publica la ruta A* completa como JSON, solo cuando cambia (evita saturar el bucle ~10 Hz)."""
+        ruta_payload = {
+            "nodo_actual": self.nodo_actual_fijo,
+            "nodo_siguiente": nodo_siguiente,
+            "nodo_destino": self.nodo_destino,
+            "ruta_completa": ruta_completa,
+            "nodo_bloqueado": nodo_bloqueado,
+            "x_ref": int(x_ref),
+            "y_ref": int(y_ref),
+            "timestamp": time.time(),
+        }
+        # El timestamp cambia siempre; comparamos ignorandolo para deduplicar de verdad.
+        clave = json.dumps({k: v for k, v in ruta_payload.items() if k != "timestamp"})
+        if clave != getattr(self, "_ultima_ruta_json", None):
+            self.client.publish(
+                mqtt_topics["planificador"]["ruta"], json.dumps(ruta_payload), retain=True
+            )
+            self._ultima_ruta_json = clave
+
     def ejecutar_ruteo(self, nodo_bloqueado=None):
         self.nodo_actual_fijo = self.calcular_nodo_actual_hibrido(self.robot_x, self.robot_y)
         self.construir_grafo_base()
@@ -125,6 +262,7 @@ class SistemaNavegacionHeadlessTorch:
             print("[A*] Meta del laberinto alcanzada con exito!")
             self.client.publish(mqtt_topics["estados"]["flag_pos"], "1")
             self.client.publish(mqtt_topics["camara"]["siguiente_nodo"], str(self.nodo_destino))
+            self.publicar_ruta(self.nodo_destino, [self.nodo_actual_fijo], nodo_bloqueado, x_meta, y_meta)
             return
         else:
             self.client.publish(mqtt_topics["estados"]["flag_pos"], "0")
@@ -142,8 +280,11 @@ class SistemaNavegacionHeadlessTorch:
             self.client.publish(mqtt_topics["comandos"]["x_ref"], str(x_ref))
             self.client.publish(mqtt_topics["comandos"]["y_ref"], str(y_ref))
             self.client.publish(mqtt_topics["camara"]["siguiente_nodo"], str(nodo_siguiente))
+            self.publicar_ruta(nodo_siguiente, ruta, nodo_bloqueado, x_ref, y_ref)
         except nx.NetworkXNoPath:
             print(f"[AVISO CRITICO] No existe ruta viable a {self.nodo_destino}.")
+            x_act, y_act = self.positions[self.nodo_actual_fijo]
+            self.publicar_ruta(self.nodo_actual_fijo, [], nodo_bloqueado, x_act, y_act)
 
 
 if __name__ == "__main__":
