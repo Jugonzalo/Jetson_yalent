@@ -15,6 +15,7 @@ mqtt_topics = {
         "grafo": "robot/planificador/grafo",
         "ruta": "robot/planificador/ruta",
         "edicion": "robot/planificador/edicion",
+        "pose_inicial": "robot/planificador/pose_inicial",
     },
     "telemetria": {
         "v_der": "robot/telemetria/v_der",
@@ -54,6 +55,7 @@ mqtt_topics = {
         "nodo_des": "robot/comandos/nodo_des",
         "reset_0": "robot/comandos/reset_0",
         "grafo": "robot/comandos/grafo",
+        "pose_inicial": "robot/comandos/pose_inicial",
     },
 }
 # se usa: mqtt_topics["telemetria"]["v_der"], mqtt_topics["estados"]["conexion_esp"], mqtt_topics["comandos"]["duty_der"]
